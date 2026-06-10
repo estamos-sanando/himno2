@@ -140,6 +140,42 @@ button {
   font-size: 13px;
 }
 
+.header-modes {
+  display: flex;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-glass);
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  gap: 4px;
+}
+
+.btn-mode-toggle {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: calc(var(--radius-sm) - 2px);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-mode-toggle:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.btn-mode-toggle.active {
+  color: #ffffff;
+  background: rgba(116, 172, 223, 0.2);
+  border: 1px solid rgba(116, 172, 223, 0.55);
+  box-shadow: 0 0 12px rgba(116, 172, 223, 0.25);
+}
+
 .header-actions {
   display: flex;
   gap: 10px;

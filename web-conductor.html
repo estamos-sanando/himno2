@@ -717,6 +717,68 @@
         font-size: 13px;
       }
     }
+
+    /* ── INSTRUMENT MODE STYLES ── */
+    .header-modes {
+      display: flex;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--border-glass);
+      padding: 3px;
+      border-radius: var(--radius-sm);
+      gap: 4px;
+    }
+
+    .btn-mode-toggle {
+      background: none;
+      border: 1px solid transparent;
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: calc(var(--radius-sm) - 2px);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-mode-toggle:hover {
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .btn-mode-toggle.active {
+      color: #ffffff;
+      background: rgba(116, 172, 223, 0.25);
+      border: 1px solid rgba(116, 172, 223, 0.55);
+      box-shadow: 0 0 12px rgba(116, 172, 223, 0.25);
+    }
+
+    .btn-wave, .btn-octave {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text-primary);
+      border: 1px solid var(--border-glass);
+      transition: all 0.15s ease;
+    }
+
+    .btn-wave:hover, .btn-octave:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .btn-wave.active {
+      background: rgba(116, 172, 223, 0.25);
+      color: #74ACDF;
+      border: 1px solid #74ACDF;
+      box-shadow: 0 0 8px rgba(116, 172, 223, 0.2);
+    }
+
+    .btn-octave.active {
+      background: rgba(246, 184, 0, 0.25);
+      color: #F6B800;
+      border: 1px solid #F6B800;
+      box-shadow: 0 0 8px rgba(246, 184, 0, 0.2);
+    }
   </style>
 </head>
 <body>
@@ -764,7 +826,13 @@
         <span class="header-title">Web Conductor</span>
       </div>
       
-      <div class="header-song" style="color: var(--cyan); border-color: rgba(0, 245, 255, 0.25);">
+      <!-- Mode Selector -->
+      <div class="header-modes">
+        <button id="btn-mode-conductor" class="btn-mode-toggle active">🎼 Conductor</button>
+        <button id="btn-mode-instrument" class="btn-mode-toggle">🎹 Instrumento</button>
+      </div>
+
+      <div id="header-song-block" class="header-song" style="color: var(--cyan); border-color: rgba(0, 245, 255, 0.25);">
         <span>🇦🇷</span>
         <span>Himno Nacional Argentino</span>
         <span class="header-artist">— Blas Parera · Vicente López y Planes</span>
@@ -873,6 +941,81 @@
           </div>
         </div>
 
+        <!-- Instrument Chord Card (Instrument Mode) -->
+        <div id="cd-block-inst-chord" class="cd-block" style="display: none; min-height: 140px; justify-content: center; flex-direction: column;">
+          <div class="cd-block-label" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <span>🎹 Sonido Activo</span>
+            <div style="display: flex; gap: 6px;">
+              <span id="inst-badge-left" class="cd-hand-badge">Izq —</span>
+              <span id="inst-badge-right" class="cd-hand-badge">Der —</span>
+            </div>
+          </div>
+          
+          <div style="text-align: center; margin-top: 10px;">
+            <div id="inst-chord-display" style="font-size: 32px; font-weight: 800; color: var(--text-secondary); transition: all 0.2s ease;">
+              Silencio (OFF)
+            </div>
+            <div id="inst-notes-display" style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+              Ninguna nota sonando
+            </div>
+          </div>
+        </div>
+
+        <!-- Instrument Piano Keys Card (Instrument Mode) -->
+        <div id="cd-block-inst-keys" class="cd-block" style="display: none; padding: 16px 12px;">
+          <div class="cd-block-label" style="margin-bottom: 12px;">
+            Visualizador de Teclas
+          </div>
+          
+          <div id="piano-container" style="display: flex; position: relative; height: 110px; background: rgba(0,0,0,0.3); border-radius: 6px; padding: 4px; overflow-x: auto; border: 1px solid var(--border-glass);">
+            <!-- Keys dynamically inserted by JS -->
+          </div>
+        </div>
+
+        <!-- Instrument Synth Controls Card (Instrument Mode) -->
+        <div id="cd-block-inst-controls" class="cd-block" style="display: none; padding: 16px 16px;">
+          <div class="cd-block-label" style="margin-bottom: 14px;">
+            🎛️ Controles del Sintetizador
+          </div>
+          
+          <div style="display: flex; flex-direction: column; gap: 14px; width: 100%;">
+            <!-- Waveform selector -->
+            <div style="width: 100%;">
+              <label style="font-size: 11px; color: var(--text-secondary); display: block; margin-bottom: 6px;">FORMA DE ONDA</label>
+              <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
+                <button class="btn-wave active" data-wave="sine" style="padding: 6px 2px; font-size: 10px; border-radius: 4px; cursor: pointer;">Senoidal</button>
+                <button class="btn-wave" data-wave="triangle" style="padding: 6px 2px; font-size: 10px; border-radius: 4px; cursor: pointer;">Triang.</button>
+                <button class="btn-wave" data-wave="sawtooth" style="padding: 6px 2px; font-size: 10px; border-radius: 4px; cursor: pointer;">Sierra</button>
+                <button class="btn-wave" data-wave="square" style="padding: 6px 2px; font-size: 10px; border-radius: 4px; cursor: pointer;">Cuadrada</button>
+              </div>
+            </div>
+
+            <!-- Octave selector -->
+            <div style="width: 100%;">
+              <label style="font-size: 11px; color: var(--text-secondary); display: block; margin-bottom: 6px;">OCTAVA BASE</label>
+              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;">
+                <button class="btn-octave" data-octave="3" style="padding: 6px 2px; font-size: 11px; border-radius: 4px; cursor: pointer;">Octava 3</button>
+                <button class="btn-octave active" data-octave="4" style="padding: 6px 2px; font-size: 11px; border-radius: 4px; cursor: pointer;">Octava 4</button>
+                <button class="btn-octave" data-octave="5" style="padding: 6px 2px; font-size: 11px; border-radius: 4px; cursor: pointer;">Octava 5</button>
+              </div>
+            </div>
+
+            <!-- Snap toggle -->
+            <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 4px; width: 100%;">
+              <div>
+                <span style="font-size: 13px; font-weight: bold; display: block;">Ajuste Visual (Snap)</span>
+                <span style="font-size: 10px; color: var(--text-secondary);">Alinear guías de dedo al sector</span>
+              </div>
+              <label style="position: relative; display: inline-block; width: 40px; height: 20px; cursor: pointer;">
+                <input id="chk-snap" type="checkbox" checked style="opacity: 0; width: 0; height: 0;">
+                <span id="snap-slider" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: #74ACDF; border-radius: 20px; transition: 0.3s;">
+                  <span id="snap-knob" style="position: absolute; height: 14px; width: 14px; left: 22px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s;"></span>
+                </span>
+              </label>
+            </div>
+          </div>
+        </div>
+
         <!-- System Status -->
         <div id="cd-status" class="cd-status">
           <span class="cd-status-dot"></span>
@@ -926,6 +1069,12 @@
       leftHandDetected: false,
       rightHandDetected: false,
       modelLoaded: false,
+      activeMode: "conductor", // "conductor" or "instrument"
+      synthWaveform: "sine",
+      synthOctave: 4,
+      snapEnabled: true,
+      activeNote: null,
+      activeQuality: null,
     };
 
     // Smooth parameters (60 fps lerped)
@@ -977,6 +1126,182 @@
     let player = null;
 
     let meter = null;
+
+    // ── INSTRUMENT SYNTHESIZER (PolySynth) ──
+    let polySynth = null;
+    let activeChordNotes = [];
+    const CHROMATIC = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    const CHORD_QUALITIES = ["maj", "min", "7", "m7", "maj7", "dim"];
+    const CHORD_INTERVALS = {
+      "maj": [0, 4, 7],
+      "min": [0, 3, 7],
+      "7": [0, 4, 7, 10],
+      "m7": [0, 3, 7, 10],
+      "maj7": [0, 4, 7, 11],
+      "dim": [0, 3, 6]
+    };
+
+    async function initPolySynth() {
+      if (polySynth) return;
+      await Tone.start();
+      polySynth = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: state.synthWaveform },
+        envelope: {
+          attack: 0.08,
+          decay: 0.1,
+          sustain: 0.8,
+          release: 0.2
+        }
+      }).toDestination();
+      polySynth.volume.value = -15;
+      console.log("Standalone PolySynth initialized.");
+    }
+
+    function getChordNotes(root, quality, octave) {
+      const rootIdx = CHROMATIC.indexOf(root);
+      if (rootIdx === -1) return [];
+      const intervals = (quality && CHORD_INTERVALS[quality]) ? CHORD_INTERVALS[quality] : [0];
+      return intervals.map(interval => {
+        const idx = rootIdx + interval;
+        const noteName = CHROMATIC[idx % 12];
+        const noteOctave = octave + Math.floor(idx / 12);
+        return `${noteName}${noteOctave}`;
+      });
+    }
+
+    async function playSynthChord(root, quality, octave) {
+      await initPolySynth();
+      if (!polySynth) return;
+
+      const newNotes = getChordNotes(root, quality, octave);
+
+      const currentNotesSorted = [...activeChordNotes].sort();
+      const targetNotesSorted = [...newNotes].sort();
+      if (JSON.stringify(currentNotesSorted) === JSON.stringify(targetNotesSorted)) {
+        return;
+      }
+
+      const notesToRelease = activeChordNotes.filter(n => !newNotes.includes(n));
+      const notesToAttack = newNotes.filter(n => !activeChordNotes.includes(n));
+
+      if (notesToRelease.length > 0) {
+        try { polySynth.triggerRelease(notesToRelease); } catch(e) {}
+      }
+      if (notesToAttack.length > 0) {
+        try { polySynth.triggerAttack(notesToAttack); } catch(e) {}
+      }
+
+      activeChordNotes = newNotes;
+      updatePianoKeyboardVisuals();
+    }
+
+    function stopAllSynthNotes() {
+      if (polySynth && activeChordNotes.length > 0) {
+        try { polySynth.triggerRelease(activeChordNotes); } catch(e) {}
+        activeChordNotes = [];
+        updatePianoKeyboardVisuals();
+      }
+    }
+
+    function buildPianoKeys() {
+      const container = document.getElementById("piano-container");
+      if (!container) return;
+      container.innerHTML = "";
+
+      const oct = state.synthOctave;
+      const octaves = [oct, oct + 1];
+      const keys = [];
+
+      octaves.forEach(o => {
+        CHROMATIC.forEach(note => {
+          keys.push({
+            note: `${note}${o}`,
+            isBlack: note.includes("#")
+          });
+        });
+      });
+
+      // Render white keys
+      keys.forEach((key) => {
+        if (key.isBlack) return;
+
+        const keyDiv = document.createElement("div");
+        keyDiv.className = "piano-key-white";
+        keyDiv.dataset.note = key.note;
+        keyDiv.style.flex = "1 0 24px";
+        keyDiv.style.height = "100%";
+        keyDiv.style.background = "#ffffff";
+        keyDiv.style.border = "1px solid #ccc";
+        keyDiv.style.borderRadius = "0 0 3px 3px";
+        keyDiv.style.position = "relative";
+        keyDiv.style.cursor = "pointer";
+        keyDiv.style.zIndex = "1";
+
+        // Label
+        const label = document.createElement("div");
+        label.style.position = "absolute";
+        label.style.bottom = "2px";
+        label.style.width = "100%";
+        label.style.textAlign = "center";
+        label.style.fontSize = "8px";
+        label.style.color = "#888";
+        label.style.fontWeight = "bold";
+        label.innerText = key.note.replace(/\d/, "");
+        keyDiv.appendChild(label);
+
+        // Black key next to it
+        const noteIdx = keys.findIndex(k => k.note === key.note);
+        const nextKey = keys[noteIdx + 1];
+        if (nextKey && nextKey.isBlack) {
+          const blackDiv = document.createElement("div");
+          blackDiv.className = "piano-key-black";
+          blackDiv.dataset.note = nextKey.note;
+          blackDiv.style.position = "absolute";
+          blackDiv.style.top = "0";
+          blackDiv.style.left = "16px";
+          blackDiv.style.width = "14px";
+          blackDiv.style.height = "60%";
+          blackDiv.style.background = "#111111";
+          blackDiv.style.borderRadius = "0 0 2px 2px";
+          blackDiv.style.border = "1px solid #000";
+          blackDiv.style.zIndex = "2";
+          keyDiv.appendChild(blackDiv);
+        }
+
+        container.appendChild(keyDiv);
+      });
+    }
+
+    function updatePianoKeyboardVisuals() {
+      const keys = document.querySelectorAll(".piano-key-white, .piano-key-black");
+      keys.forEach(key => {
+        const note = key.dataset.note;
+        const isActive = activeChordNotes.includes(note);
+        const isBlack = key.classList.contains("piano-key-black");
+
+        if (isActive) {
+          if (isBlack) {
+            key.style.background = "linear-gradient(to bottom, #F6B800, #333)";
+            key.style.boxShadow = "0 0 8px #F6B800";
+          } else {
+            key.style.background = "linear-gradient(to bottom, #74ACDF, #ffffff)";
+            key.style.boxShadow = "0 0 8px #74ACDF";
+            const lbl = key.querySelector("div");
+            if (lbl) lbl.style.color = "#000";
+          }
+        } else {
+          if (isBlack) {
+            key.style.background = "#111111";
+            key.style.boxShadow = "none";
+          } else {
+            key.style.background = "#ffffff";
+            key.style.boxShadow = "none";
+            const lbl = key.querySelector("div");
+            if (lbl) lbl.style.color = "#888";
+          }
+        }
+      });
+    }
 
     function getAudioLevel() {
       if (!audioReady || !meter) return 0;
@@ -1123,6 +1448,10 @@
       let leftY = 0.5;
       let rightY = 0.5;
 
+      // We'll capture finger tip positions for Instrument Mode
+      let leftFingerPos = null;
+      let rightFingerPos = null;
+
       if (result && result.handednesses && result.landmarks) {
         for (let h = 0; h < result.handednesses.length; h++) {
           const category = result.handednesses[h][0].categoryName; // "Left" or "Right" physical
@@ -1164,6 +1493,18 @@
             rightHandClosed = isClosed;
           }
 
+          // In Instrument Mode, track index finger tip (landmark index 8)
+          if (state.activeMode === "instrument" && marks && marks.length > 8) {
+            const tip = marks[8];
+            const fx = mx(tip.x);
+            const fy = my(tip.y);
+            if (fx < vw / 2) {
+              leftFingerPos = { x: fx, y: fy };
+            } else {
+              rightFingerPos = { x: fx, y: fy };
+            }
+          }
+
           // Draw skeleton connections
           ctx.lineWidth = 2;
           ctx.strokeStyle = color;
@@ -1189,8 +1530,8 @@
             ctx.stroke();
           }
 
-          // Draw gold baton trail for TEMPO hand (screen-RIGHT / physical right)
-          if (!isLeft) {
+          // Draw gold baton trail for TEMPO hand (screen-RIGHT / physical right) - Conductor Mode only
+          if (!isLeft && state.activeMode === "conductor") {
             const tip = marks[8]; // Index finger tip
             const tx = mx(tip.x);
             const ty = my(tip.y);
@@ -1223,8 +1564,28 @@
         }
       }
 
+      // We'll run secondary hand detection parsing for Instrument Mode if MediaPipe returns wrong order
+      if (result && result.landmarks && state.activeMode === "instrument") {
+        const mx = (x) => (1 - x) * vw;
+        const my = (y) => y * vh;
+        for (let h = 0; h < result.handednesses.length; h++) {
+          const category = result.handednesses[h][0].categoryName;
+          const marks = result.landmarks[h];
+          if (marks && marks.length > 8) {
+            const tip = marks[8];
+            const fx = mx(tip.x);
+            const fy = my(tip.y);
+            if (category === "Left") {
+              leftFingerPos = { x: fx, y: fy };
+            } else {
+              rightFingerPos = { x: fx, y: fy };
+            }
+          }
+        }
+      }
+
       // ── Right hand closed fist restart ──
-      if (rightHandDet && rightHandClosed) {
+      if (rightHandDet && rightHandClosed && state.activeMode === "conductor") {
         const now = performance.now();
         if (now - lastRestartTime > 3000) {
           lastRestartTime = now;
@@ -1233,21 +1594,82 @@
       }
 
       // ── UPDATE LIVE GESTURES ──
-      // Volume: screen-left (physical left)
-      if (leftHandDet) {
-        const norm = Math.max(0, Math.min(1, (Y_MAX - leftY) / (Y_MAX - Y_MIN)));
-        smooth.volume = smooth.volume * 0.85 + norm * 0.15;
-      }
-      
-      // Tempo: screen-right (physical right)
-      if (rightHandDet) {
-        const norm = Math.max(0, Math.min(1, (Y_MAX - rightY) / (Y_MAX - Y_MIN)));
-        const target = BPM_MIN + norm * (BPM_MAX - BPM_MIN);
-        smooth.bpm = smooth.bpm * 0.85 + target * 0.15;
-      }
+      if (state.activeMode === "conductor") {
+        // Volume: screen-left (physical left)
+        if (leftHandDet) {
+          const norm = Math.max(0, Math.min(1, (Y_MAX - leftY) / (Y_MAX - Y_MIN)));
+          smooth.volume = smooth.volume * 0.85 + norm * 0.15;
+        }
+        
+        // Tempo: screen-right (physical right)
+        if (rightHandDet) {
+          const norm = Math.max(0, Math.min(1, (Y_MAX - rightY) / (Y_MAX - Y_MIN)));
+          const target = BPM_MIN + norm * (BPM_MAX - BPM_MIN);
+          smooth.bpm = smooth.bpm * 0.85 + target * 0.15;
+        }
 
-      // Update Audio Node parameters immediately
-      updateAudioParams(smooth.volume, smooth.bpm);
+        // Update Audio Node parameters immediately
+        updateAudioParams(smooth.volume, smooth.bpm);
+      } else {
+        // Instrument mode collision checks
+        let activeLeftIdx = "OFF";
+        let activeRightIdx = "OFF";
+
+        const leftCenterX = vw * 0.25;
+        const leftCenterY = vh * 0.5;
+        const rightCenterX = vw * 0.75;
+        const rightCenterY = vh * 0.5;
+        const outerR = 125;
+        const innerR = 44;
+
+        if (leftFingerPos) {
+          const dx = leftFingerPos.x - leftCenterX;
+          const dy = leftFingerPos.y - leftCenterY;
+          const distance = Math.hypot(dx, dy);
+          if (distance >= innerR && distance <= outerR) {
+            let angle = Math.atan2(dy, dx) + Math.PI / 2;
+            if (angle < 0) angle += 2 * Math.PI;
+            activeLeftIdx = Math.floor((angle / (2 * Math.PI)) * 12) % 12;
+          } else if (distance < innerR) {
+            activeLeftIdx = "OFF";
+          }
+        }
+
+        if (rightFingerPos) {
+          const dx = rightFingerPos.x - rightCenterX;
+          const dy = rightFingerPos.y - rightCenterY;
+          const distance = Math.hypot(dx, dy);
+          if (distance >= innerR && distance <= outerR) {
+            let angle = Math.atan2(dy, dx) + Math.PI / 2;
+            if (angle < 0) angle += 2 * Math.PI;
+            activeRightIdx = Math.floor((angle / (2 * Math.PI)) * 6) % 6;
+          } else if (distance < innerR) {
+            activeRightIdx = "OFF";
+          }
+        }
+
+        // Draw Left Wheel (Notes)
+        drawInteractiveWheel(ctx, leftCenterX, leftCenterY, outerR, innerR, 12, CHROMATIC, activeLeftIdx, leftFingerPos, state.snapEnabled, "#74ACDF");
+
+        // Draw Right Wheel (Chords)
+        const chordLabels = ["May", "Min", "7ma", "m7", "maj7", "dim"];
+        drawInteractiveWheel(ctx, rightCenterX, rightCenterY, outerR, innerR, 6, chordLabels, activeRightIdx, rightFingerPos, state.snapEnabled, "#F6B800");
+
+        // Trigger Audio Synthesis
+        if (leftHandDet && typeof activeLeftIdx === "number") {
+          state.activeNote = CHROMATIC[activeLeftIdx];
+          if (rightHandDet && typeof activeRightIdx === "number") {
+            state.activeQuality = CHORD_QUALITIES[activeRightIdx];
+          } else {
+            state.activeQuality = null;
+          }
+          playSynthChord(state.activeNote, state.activeQuality, state.synthOctave);
+        } else {
+          state.activeNote = null;
+          state.activeQuality = null;
+          stopAllSynthNotes();
+        }
+      }
 
       // ── UPDATE DASHBOARD UI ──
       state.leftHandDetected = leftHandDet;
@@ -1260,65 +1682,231 @@
       animId = requestAnimationFrame(runLoop);
     }
 
+    // ── INTERACTIVE DIALS DRAWING ──
+    function drawInteractiveWheel(ctx, cx, cy, outerR, innerR, segments, labels, activeIdx, fingerPos, snapEnabled, colorTheme) {
+      // Draw segment wedges
+      for (let i = 0; i < segments; i++) {
+        const startAngle = (i * 2 * Math.PI / segments) - Math.PI / 2;
+        const endAngle = ((i + 1) * 2 * Math.PI / segments) - Math.PI / 2;
+        const midAngle = startAngle + (endAngle - startAngle) / 2;
+        const isActive = activeIdx === i;
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, outerR, startAngle, endAngle);
+        ctx.arc(cx, cy, innerR, endAngle, startAngle, true);
+        ctx.closePath();
+
+        if (isActive) {
+          ctx.fillStyle = colorTheme === "#74ACDF" ? "rgba(116, 172, 223, 0.35)" : "rgba(246, 184, 0, 0.35)";
+          ctx.strokeStyle = colorTheme;
+          ctx.lineWidth = 3;
+        } else {
+          ctx.fillStyle = "rgba(15, 23, 42, 0.4)";
+          ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+          ctx.lineWidth = 1;
+        }
+        ctx.fill();
+        ctx.stroke();
+
+        // Label rotation & offset drawing
+        ctx.save();
+        ctx.translate(cx, cy);
+        const textRadius = (outerR + innerR) / 2;
+        const tx = Math.cos(midAngle) * textRadius;
+        const ty = Math.sin(midAngle) * textRadius;
+        ctx.translate(tx, ty);
+        ctx.rotate(midAngle + Math.PI / 2);
+        ctx.fillStyle = isActive ? "#ffffff" : "rgba(255, 255, 255, 0.7)";
+        ctx.font = isActive ? "bold 13px Inter, sans-serif" : "11px Inter, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(labels[i], 0, 0);
+        ctx.restore();
+      }
+
+      // Draw inner OFF button
+      ctx.beginPath();
+      ctx.arc(cx, cy, innerR, 0, 2 * Math.PI);
+      const isOffActive = activeIdx === "OFF";
+      if (isOffActive) {
+        ctx.fillStyle = "rgba(239, 68, 68, 0.25)";
+        ctx.strokeStyle = "#ef4444";
+        ctx.lineWidth = 3;
+      } else {
+        ctx.fillStyle = "rgba(15, 23, 42, 0.65)";
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+        ctx.lineWidth = 1;
+      }
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = isOffActive ? "#ffffff" : "rgba(255, 255, 255, 0.4)";
+      ctx.font = isOffActive ? "bold 11px Inter, sans-serif" : "9px Inter, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("OFF", cx, cy);
+
+      // Draw finger cursor guides
+      if (fingerPos) {
+        let drawX = fingerPos.x;
+        let drawY = fingerPos.y;
+
+        if (snapEnabled && typeof activeIdx === "number") {
+          const startAngle = (activeIdx * 2 * Math.PI / segments) - Math.PI / 2;
+          const endAngle = ((activeIdx + 1) * 2 * Math.PI / segments) - Math.PI / 2;
+          const midAngle = startAngle + (endAngle - startAngle) / 2;
+          const textRadius = (outerR + innerR) / 2;
+          drawX = cx + Math.cos(midAngle) * textRadius;
+          drawY = cy + Math.sin(midAngle) * textRadius;
+
+          // Connective dashed guide
+          ctx.beginPath();
+          ctx.moveTo(fingerPos.x, fingerPos.y);
+          ctx.lineTo(drawX, drawY);
+          ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
+          ctx.lineWidth = 1;
+          ctx.setLineDash([3, 3]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        ctx.beginPath();
+        ctx.arc(drawX, drawY, 8, 0, Math.PI * 2);
+        ctx.fillStyle = colorTheme;
+        ctx.shadowColor = colorTheme;
+        ctx.shadowBlur = 10;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+    }
+
     // ── DASHBOARD UI UPDATE ──
     function updateUI() {
-      // ── Left Card (Volume)
-      if (state.leftHandDetected) {
-        blockLeft.classList.add("cd-block-active");
-        badgeLeft.textContent = "✓ DETECTADA";
-        badgeLeft.className = "cd-hand-badge detected";
-      } else {
-        blockLeft.classList.remove("cd-block-active");
-        badgeLeft.textContent = "— NO VISIBLE";
-        badgeLeft.className = "cd-hand-badge";
-      }
-      volValue.textContent = Math.round(state.volume * 100);
-      
-      // VU Bars lighting (reacting in real time to audio output level)
-      const level = getAudioLevel();
-      if (typeof window.smoothVUVal === 'undefined') {
-        window.smoothVUVal = 0;
-      }
-      if (level > window.smoothVUVal) {
-        window.smoothVUVal = level; // instant attack
-      } else {
-        window.smoothVUVal = window.smoothVUVal * 0.85 + level * 0.15; // smooth decay
-      }
-
-      const totalBars = vuBars.length;
-      for (let i = 0; i < totalBars; i++) {
-        const bar = vuBars[i];
-        const threshold = (totalBars - 1 - i) / (totalBars - 1);
-        const lit = window.smoothVUVal >= threshold;
-        bar.style.opacity = lit ? 1 : 0.1;
-        if (lit) {
-          const hue = 120 - (i / (totalBars - 1)) * 120; // Green -> Yellow -> Red
-          bar.style.background = `hsl(${hue}, 100%, 55%)`;
-          bar.style.boxShadow = `0 0 6px hsl(${hue}, 100%, 55%)`;
+      if (state.activeMode === "conductor") {
+        // ── Left Card (Volume)
+        if (state.leftHandDetected) {
+          blockLeft.classList.add("cd-block-active");
+          badgeLeft.textContent = "✓ DETECTADA";
+          badgeLeft.className = "cd-hand-badge detected";
         } else {
-          bar.style.background = "";
-          bar.style.boxShadow = "";
+          blockLeft.classList.remove("cd-block-active");
+          badgeLeft.textContent = "— NO VISIBLE";
+          badgeLeft.className = "cd-hand-badge";
+        }
+        volValue.textContent = Math.round(state.volume * 100);
+        
+        // VU Bars lighting (reacting in real time to audio output level)
+        const level = getAudioLevel();
+        if (typeof window.smoothVUVal === 'undefined') {
+          window.smoothVUVal = 0;
+        }
+        if (level > window.smoothVUVal) {
+          window.smoothVUVal = level; // instant attack
+        } else {
+          window.smoothVUVal = window.smoothVUVal * 0.85 + level * 0.15; // smooth decay
+        }
+
+        const totalBars = vuBars.length;
+        for (let i = 0; i < totalBars; i++) {
+          const bar = vuBars[i];
+          const threshold = (totalBars - 1 - i) / (totalBars - 1);
+          const lit = window.smoothVUVal >= threshold;
+          bar.style.opacity = lit ? 1 : 0.1;
+          if (lit) {
+            const hue = 120 - (i / (totalBars - 1)) * 120; // Green -> Yellow -> Red
+            bar.style.background = `hsl(${hue}, 100%, 55%)`;
+            bar.style.boxShadow = `0 0 6px hsl(${hue}, 100%, 55%)`;
+          } else {
+            bar.style.background = "";
+            bar.style.boxShadow = "";
+          }
+        }
+
+        // ── Right Card (Tempo)
+        if (state.rightHandDetected) {
+          blockRight.classList.add("cd-block-active");
+          badgeRight.textContent = "✓ DETECTADA";
+          badgeRight.className = "cd-hand-badge detected";
+        } else {
+          blockRight.classList.remove("cd-block-active");
+          badgeRight.textContent = "— NO VISIBLE";
+          badgeRight.className = "cd-hand-badge";
+        }
+        
+        bpmValue.textContent = state.bpm;
+        bpmMood.textContent = getTempoMood(state.bpm);
+
+        // Ring progress
+        const bpmNorm = Math.max(0, Math.min(1, (state.bpm - BPM_MIN) / (BPM_MAX - BPM_MIN)));
+        const offset = CIRC * (1 - bpmNorm);
+        ringProgress.style.strokeDashoffset = offset;
+      } else {
+        // ── Instrument Mode UI updates
+        const badgeL = document.getElementById("inst-badge-left");
+        const badgeR = document.getElementById("inst-badge-right");
+        const blockChord = document.getElementById("cd-block-inst-chord");
+
+        if (state.leftHandDetected) {
+          if (badgeL) {
+            badgeL.textContent = "✓ ACTIVA";
+            badgeL.className = "cd-hand-badge detected";
+          }
+          if (blockChord) blockChord.classList.add("cd-block-active");
+        } else {
+          if (badgeL) {
+            badgeL.textContent = "— NO VISIBLE";
+            badgeL.className = "cd-hand-badge";
+          }
+          if (blockChord) blockChord.classList.remove("cd-block-active");
+        }
+
+        if (state.rightHandDetected) {
+          if (badgeR) {
+            badgeR.textContent = "✓ ACTIVA";
+            badgeR.className = "cd-hand-badge detected";
+          }
+        } else {
+          if (badgeR) {
+            badgeR.textContent = "— NO VISIBLE";
+            badgeR.className = "cd-hand-badge";
+          }
+        }
+
+        const chordDisp = document.getElementById("inst-chord-display");
+        const notesDisp = document.getElementById("inst-notes-display");
+
+        if (state.activeNote) {
+          const qualityMap = {
+            "maj": "Mayor",
+            "min": "Menor",
+            "7": "Séptima (7)",
+            "m7": "Menor 7 (m7)",
+            "maj7": "Mayor 7 (maj7)",
+            "dim": "Disminuido (dim)"
+          };
+          const qualName = state.activeQuality ? (qualityMap[state.activeQuality] || state.activeQuality) : "Nota Simple";
+          if (chordDisp) {
+            chordDisp.textContent = `${state.activeNote} ${qualName}`;
+            chordDisp.style.color = "#74ACDF";
+            chordDisp.style.textShadow = "0 0 15px rgba(116, 172, 223, 0.5)";
+          }
+          if (notesDisp) {
+            notesDisp.textContent = `Notas: ${activeChordNotes.join(" - ")}`;
+          }
+        } else {
+          if (chordDisp) {
+            chordDisp.textContent = "Silencio (OFF)";
+            chordDisp.style.color = "var(--text-secondary)";
+            chordDisp.style.textShadow = "none";
+          }
+          if (notesDisp) {
+            notesDisp.textContent = "Ninguna nota sonando";
+          }
         }
       }
-
-      // ── Right Card (Tempo)
-      if (state.rightHandDetected) {
-        blockRight.classList.add("cd-block-active");
-        badgeRight.textContent = "✓ DETECTADA";
-        badgeRight.className = "cd-hand-badge detected";
-      } else {
-        blockRight.classList.remove("cd-block-active");
-        badgeRight.textContent = "— NO VISIBLE";
-        badgeRight.className = "cd-hand-badge";
-      }
-      
-      bpmValue.textContent = state.bpm;
-      bpmMood.textContent = getTempoMood(state.bpm);
-
-      // Ring progress
-      const bpmNorm = Math.max(0, Math.min(1, (state.bpm - BPM_MIN) / (BPM_MAX - BPM_MIN)));
-      const offset = CIRC * (1 - bpmNorm);
-      ringProgress.style.strokeDashoffset = offset;
     }
 
     function getTempoMood(bpm) {
@@ -1335,29 +1923,30 @@
     // ── PLAYBACK CONTROL ──
     async function startExperience() {
       await Tone.start();
-      await initAudio();
       
       state.isPlaying = true;
       state.trackingEnabled = true;
-
-      // Start camera right away (non-blocking)
-      const cameraPromise = startCamera();
-
-      // Start audio immediately if it is already loaded
-      if (player && player.loaded) {
-        player.start();
-      }
 
       // Hide intro overlay
       introOverlay.style.display = "none";
       btnPlayToggle.textContent = "⏹ Detener";
       btnPlayToggle.className = "btn-danger";
-      
       cdStatus.classList.add("playing");
-      statusText.textContent = "🎼 Himno Nacional Argentino en marcha";
 
-      // Start BPM beating flash
-      startBpmBeater();
+      if (state.activeMode === "conductor") {
+        await initAudio();
+        if (player && player.loaded) {
+          player.start();
+        }
+        statusText.textContent = "🎼 Himno Nacional Argentino en marcha";
+        startBpmBeater();
+      } else {
+        await initPolySynth();
+        statusText.textContent = "Levanta las manos frente a las ruedas";
+      }
+
+      // Start camera right away (non-blocking)
+      const cameraPromise = startCamera();
 
       // Load hand tracking model asynchronously in the background
       initHandTracking().then(() => {
@@ -1375,6 +1964,7 @@
       if (player) {
         player.stop();
       }
+      stopAllSynthNotes();
       stopCamera();
       
       state.isPlaying = false;
@@ -1387,7 +1977,12 @@
       btnPlayToggle.className = "btn-primary";
       
       cdStatus.classList.remove("playing");
-      statusText.textContent = "Presiona Iniciar para comenzar";
+      
+      if (state.activeMode === "conductor") {
+        statusText.textContent = "Presiona Iniciar para comenzar";
+      } else {
+        statusText.textContent = "Presiona Iniciar para activar cámara y sintetizador";
+      }
       
       // Clear visualizers
       badgeLeft.textContent = "—";
@@ -1400,6 +1995,28 @@
         b.style.boxShadow = "";
       });
       ringProgress.style.strokeDashoffset = CIRC;
+
+      // Clear instrument visualizers too
+      const badgeL = document.getElementById("inst-badge-left");
+      const badgeR = document.getElementById("inst-badge-right");
+      if (badgeL) {
+        badgeL.textContent = "Izq —";
+        badgeL.className = "cd-hand-badge";
+      }
+      if (badgeR) {
+        badgeR.textContent = "Der —";
+        badgeR.className = "cd-hand-badge";
+      }
+      const chordDisp = document.getElementById("inst-chord-display");
+      if (chordDisp) {
+        chordDisp.textContent = "Silencio (OFF)";
+        chordDisp.style.color = "var(--text-secondary)";
+        chordDisp.style.textShadow = "none";
+      }
+      const notesDisp = document.getElementById("inst-notes-display");
+      if (notesDisp) {
+        notesDisp.textContent = "Ninguna nota sonando";
+      }
       
       const ctx = webcamCanvas.getContext("2d");
       ctx.clearRect(0, 0, webcamCanvas.width, webcamCanvas.height);
@@ -1468,6 +2085,119 @@
       }
     });
 
+    // ── INSTRUMENT INTERACTION & MODE HANDLERS ──
+    const btnModeConductor = document.getElementById("btn-mode-conductor");
+    const btnModeInstrument = document.getElementById("btn-mode-instrument");
+    const headerSongBlock = document.getElementById("header-song-block");
+
+    const blockInstChord = document.getElementById("cd-block-inst-chord");
+    const blockInstKeys = document.getElementById("cd-block-inst-keys");
+    const blockInstControls = document.getElementById("cd-block-inst-controls");
+
+    btnModeConductor.addEventListener("click", () => {
+      if (state.activeMode === "conductor") return;
+      setMode("conductor");
+    });
+
+    btnModeInstrument.addEventListener("click", () => {
+      if (state.activeMode === "instrument") return;
+      setMode("instrument");
+    });
+
+    function setMode(mode) {
+      state.activeMode = mode;
+      
+      if (mode === "conductor") {
+        btnModeConductor.classList.add("active");
+        btnModeInstrument.classList.remove("active");
+        if (headerSongBlock) headerSongBlock.style.display = "flex";
+        
+        blockLeft.style.display = "flex";
+        blockRight.style.display = "flex";
+        if (blockInstChord) blockInstChord.style.display = "none";
+        if (blockInstKeys) blockInstKeys.style.display = "none";
+        if (blockInstControls) blockInstControls.style.display = "none";
+        
+        document.querySelector(".webcam-legend").innerHTML = `
+          <span class="legend-dot" style="background: var(--cyan);"></span>
+          <span>← Volumen (Mano Izq)</span>
+          <span class="legend-dot" style="background: var(--purple);"></span>
+          <span>Tempo (Mano Der) →</span>
+`;
+        
+        stopAllSynthNotes();
+        if (player) player.stop();
+        stopExperience();
+        
+      } else {
+        btnModeConductor.classList.remove("active");
+        btnModeInstrument.classList.add("active");
+        if (headerSongBlock) headerSongBlock.style.display = "none";
+        
+        blockLeft.style.display = "none";
+        blockRight.style.display = "none";
+        if (blockInstChord) blockInstChord.style.display = "flex";
+        if (blockInstKeys) blockInstKeys.style.display = "block";
+        if (blockInstControls) blockInstControls.style.display = "block";
+        
+        document.querySelector(".webcam-legend").innerHTML = `
+          <span class="legend-dot" style="background: var(--cyan);"></span>
+          <span>← Notas (Rueda Izq)</span>
+          <span class="legend-dot" style="background: var(--purple);"></span>
+          <span>Acordes (Rueda Der) →</span>
+`;
+        
+        buildPianoKeys();
+        
+        stopAllSynthNotes();
+        if (player) player.stop();
+        stopExperience();
+      }
+    }
+
+    // Synth Waveform buttons
+    const btnWaves = document.querySelectorAll(".btn-wave");
+    btnWaves.forEach(btn => {
+      btn.addEventListener("click", () => {
+        btnWaves.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        state.synthWaveform = btn.dataset.wave;
+        if (polySynth) {
+          polySynth.set({
+            oscillator: { type: state.synthWaveform }
+          });
+        }
+      });
+    });
+
+    // Synth Octave buttons
+    const btnOctaves = document.querySelectorAll(".btn-octave");
+    btnOctaves.forEach(btn => {
+      btn.addEventListener("click", () => {
+        btnOctaves.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        state.synthOctave = parseInt(btn.dataset.octave);
+        buildPianoKeys();
+      });
+    });
+
+    // Snap Checkbox
+    const chkSnap = document.getElementById("chk-snap");
+    const snapKnob = document.getElementById("snap-knob");
+    const snapSlider = document.getElementById("snap-slider");
+    if (chkSnap) {
+      chkSnap.addEventListener("change", () => {
+        state.snapEnabled = chkSnap.checked;
+        if (chkSnap.checked) {
+          if (snapKnob) snapKnob.style.left = "22px";
+          if (snapSlider) snapSlider.style.backgroundColor = "#74ACDF";
+        } else {
+          if (snapKnob) snapKnob.style.left = "4px";
+          if (snapSlider) snapSlider.style.backgroundColor = "rgba(255,255,255,0.15)";
+        }
+      });
+    }
+
     // Cleanup on close
     window.addEventListener("beforeunload", () => {
       stopExperience();
@@ -1482,26 +2212,56 @@
       <img src="escudo-argentino.png" alt="Escudo Nacional Argentino" style="width: 80px; height: auto; margin: 0 auto 16px block; display: block; filter: drop-shadow(0 0 8px rgba(116, 172, 223, 0.3));">
       <h2 class="intro-title" style="margin-bottom: 20px;">Instrucciones de Dirección</h2>
       
-      <ul class="intro-features" style="margin-bottom: 24px;">
+      <div style="margin-bottom: 12px; border-bottom: 1px solid var(--border-glass); padding-bottom: 6px;">
+        <span style="font-weight: 800; color: #74ACDF;">🎼 Modo Conductor</span>
+      </div>
+      <ul class="intro-features" style="margin-bottom: 12px;">
         <li>
           <span>🔵</span>
           <div>
             <strong>Mano Izquierda (Volumen)</strong><br>
-            Aparece en el lado izquierdo. Sube para aumentar el volumen (hasta 100%) and baja para atenuar (hasta silencio).
+            Aparece en el lado izquierdo. Sube para subir el volumen, baja para silenciar.
           </div>
         </li>
         <li>
           <span>🟣</span>
           <div>
             <strong>Mano Derecha (Tempo)</strong><br>
-            Aparece en el lado derecho. Sube para acelerar la velocidad de reproducción y baja para ir más lento.
+            Aparece en el lado derecho. Sube para acelerar la velocidad y baja para ralentizar.
           </div>
         </li>
         <li>
           <span>✊</span>
           <div>
             <strong>Puño Cerrado Derecho (Reiniciar)</strong><br>
-            Cierra el puño de tu mano derecha (lado de tempo) para reiniciar la canción al instante al volumen y tempo originales.
+            Cierra el puño derecho para reiniciar el himno.
+          </div>
+        </li>
+      </ul>
+
+      <div style="margin-bottom: 12px; border-bottom: 1px solid var(--border-glass); padding-bottom: 6px; margin-top: 12px;">
+        <span style="font-weight: 800; color: #F6B800;">🎹 Modo Instrumento (Acordes)</span>
+      </div>
+      <ul class="intro-features" style="margin-bottom: 24px;">
+        <li>
+          <span>🔵</span>
+          <div>
+            <strong>Mano Izquierda (Rueda de Notas)</strong><br>
+            Mueve tu dedo índice en el dial izquierdo para seleccionar la nota raíz (Do, Re, Mi, etc.).
+          </div>
+        </li>
+        <li>
+          <span>🟣</span>
+          <div>
+            <strong>Mano Derecha (Rueda de Acordes)</strong><br>
+            Mueve tu dedo índice en el dial derecho para elegir la cualidad (May, Min, 7ma, m7, maj7, dim).
+          </div>
+        </li>
+        <li>
+          <span>🔴</span>
+          <div>
+            <strong>Centro (OFF)</strong><br>
+            Coloca tu dedo índice en el centro de cualquiera de las ruedas para silenciar el sintetizador.
           </div>
         </li>
       </ul>

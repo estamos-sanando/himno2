@@ -7,6 +7,9 @@ import { useAudioEngine } from "./hooks/useAudioEngine";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 import WebcamPreview from "./components/WebcamPreview";
 import ConductorDashboard from "./components/ConductorDashboard";
+import { useChordSynth, CHROMATIC } from "./hooks/useChordSynth";
+import type { WaveformType } from "./hooks/useChordSynth";
+import InstrumentDashboard from "./components/InstrumentDashboard";
 import "./App.css";
 
 // BPM range mapped from hand vertical position
@@ -26,6 +29,14 @@ export default function App() {
   const [trackingEnabled, setTrackingEnabled] = useState(false);
   const [showIntro,    setShowIntro]    = useState(true);
 
+  // Mode selection & instrument synth configurations
+  const [activeMode, setActiveMode] = useState<"conductor" | "instrument">("conductor");
+  const [synthWaveform, setSynthWaveform] = useState<WaveformType>("sine");
+  const [synthOctave, setSynthOctave] = useState<number>(4);
+  const [snapEnabled, setSnapEnabled] = useState<boolean>(true);
+  const [activeNote, setActiveNote] = useState<string | null>(null);
+  const [activeQuality, setActiveQuality] = useState<string | null>(null);
+
   // UI display state (throttled ~12 fps)
   const [bpm,           setBpm]           = useState(SONGS[0].bpmBase);
   const [volume,        setVolume]        = useState(0.7);
@@ -36,15 +47,37 @@ export default function App() {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const vuBarsRef = useRef<HTMLDivElement>(null);
+  
+  // Audio Conductor Engine
   const engine   = useAudioEngine();
   const engineRef = useRef(engine);
   engineRef.current = engine;
 
+  // Audio Chord Synth Hook
+  const { playChord, stopAll, setWaveform } = useChordSynth();
+  const playChordRef = useRef(playChord);
+  const stopAllRef = useRef(stopAll);
+  const synthOctaveRef = useRef(synthOctave);
+  const activeModeRef = useRef(activeMode);
+  
+  playChordRef.current = playChord;
+  stopAllRef.current = stopAll;
+  synthOctaveRef.current = synthOctave;
+  activeModeRef.current = activeMode;
+
   // Smooth values — live at 60 fps, no React state
   const smoothVolRef = useRef(0.7);
   const smoothBPMRef = useRef(SONGS[0].bpmBase);
+  const smoothActiveNoteRef = useRef<string | null>(null);
+  const smoothActiveQualityRef = useRef<string | null>(null);
+  
   const lastUIFlush  = useRef(0);
   const lastRestartRef = useRef(0);
+
+  const handleWaveformChange = useCallback((w: WaveformType) => {
+    setSynthWaveform(w);
+    setWaveform(w);
+  }, [setWaveform]);
 
   const handleRestart = useCallback(async () => {
     console.log("Restarting song due to right hand closed fist gesture");
@@ -57,36 +90,107 @@ export default function App() {
   }, [engine, selectedSong]);
 
   /**
-   * Gesture handler — runs at ~60 fps.
+   * Gesture handler — runs at ~60 fps (or 30fps hand tracking throttle).
    */
   const onGesture = useCallback((g: HandGesture) => {
-    // ── Volume: screen-LEFT hand (physical left hand) ──────────
-    if (g.leftHand.detected) {
-      const norm = Math.max(0, Math.min(1, (Y_MAX - g.leftHand.y) / (Y_MAX - Y_MIN)));
-      smoothVolRef.current = smoothVolRef.current * 0.85 + norm * 0.15;
-    }
+    if (activeModeRef.current === "conductor") {
+      // ── Conductor Mode ───────────────────────────────────────
+      // Volume: screen-LEFT hand (physical left hand)
+      if (g.leftHand.detected) {
+        const norm = Math.max(0, Math.min(1, (Y_MAX - g.leftHand.y) / (Y_MAX - Y_MIN)));
+        smoothVolRef.current = smoothVolRef.current * 0.85 + norm * 0.15;
+      }
 
-    // ── Tempo: screen-RIGHT hand (physical right hand) ───────────
-    if (g.rightHand.detected) {
-      const norm = Math.max(0, Math.min(1, (Y_MAX - g.rightHand.y) / (Y_MAX - Y_MIN)));
-      const target = BPM_MIN + norm * (BPM_MAX - BPM_MIN);
-      smoothBPMRef.current = smoothBPMRef.current * 0.85 + target * 0.15;
-    }
+      // Tempo: screen-RIGHT hand (physical right hand)
+      if (g.rightHand.detected) {
+        const norm = Math.max(0, Math.min(1, (Y_MAX - g.rightHand.y) / (Y_MAX - Y_MIN)));
+        const target = BPM_MIN + norm * (BPM_MAX - BPM_MIN);
+        smoothBPMRef.current = smoothBPMRef.current * 0.85 + target * 0.15;
+      }
 
-    // ── Right hand closed fist restart ──
-    if (g.rightHand.detected && g.rightHand.isClosed) {
-      const now = performance.now();
-      if (now - lastRestartRef.current > 3000) {
-        lastRestartRef.current = now;
-        handleRestart();
+      // Right hand closed fist restart
+      if (g.rightHand.detected && g.rightHand.isClosed) {
+        const now = performance.now();
+        if (now - lastRestartRef.current > 3000) {
+          lastRestartRef.current = now;
+          handleRestart();
+        }
+      }
+
+      // Push to audio engine at full 60 fps (no React state!)
+      engineRef.current.update({
+        volume: smoothVolRef.current,
+        bpm:    smoothBPMRef.current,
+      });
+
+      smoothActiveNoteRef.current = null;
+      smoothActiveQualityRef.current = null;
+    } else {
+      // ── Instrument Mode ──────────────────────────────────────
+      let hoveredNote: string | null = null;
+      let hoveredQuality: string | null = null;
+      let leftOff = false;
+
+      if (g.landmarks && g.landmarks.landmarks) {
+        const { landmarks } = g.landmarks;
+        for (let h = 0; h < landmarks.length; h++) {
+          const marks = landmarks[h];
+          if (!marks || marks.length < 21) continue;
+
+          const tip = marks[8]; // INDEX_FINGER_TIP
+          // Mirror x coordinate because video is mirrored
+          const fx = (1 - tip.x) * 640;
+          const fy = tip.y * 480;
+
+          if (fx < 320) {
+            // Left half -> Note Wheel (Center: 160, 240, R: 125, rInner: 44)
+            const cx = 160;
+            const cy = 240;
+            const dist = Math.hypot(fx - cx, fy - cy);
+            if (dist <= 125) {
+              if (dist < 44) {
+                leftOff = true;
+              } else {
+                const angle = Math.atan2(fy - cy, fx - cx);
+                const angNorm = (angle + Math.PI / 2 + Math.PI / 12 + 2 * Math.PI) % (2 * Math.PI);
+                const idx = Math.floor(angNorm / (Math.PI / 6));
+                if (idx >= 0 && idx < 12) {
+                  hoveredNote = CHROMATIC[idx];
+                }
+              }
+            }
+          } else {
+            // Right half -> Chord Wheel (Center: 480, 240, R: 125, rInner: 44)
+            const cx = 480;
+            const cy = 240;
+            const dist = Math.hypot(fx - cx, fy - cy);
+            if (dist <= 125) {
+              if (dist < 44) {
+                // OFF region -> plays single root note
+              } else {
+                const angle = Math.atan2(fy - cy, fx - cx);
+                const angNorm = (angle + Math.PI / 2 + Math.PI / 6 + 2 * Math.PI) % (2 * Math.PI);
+                const idx = Math.floor(angNorm / (Math.PI / 3));
+                const qualities = ["maj", "min", "7", "m7", "maj7", "dim"];
+                if (idx >= 0 && idx < 6) {
+                  hoveredQuality = qualities[idx];
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (leftOff || !hoveredNote) {
+        stopAllRef.current();
+        smoothActiveNoteRef.current = null;
+        smoothActiveQualityRef.current = null;
+      } else {
+        playChordRef.current(hoveredNote, hoveredQuality, synthOctaveRef.current);
+        smoothActiveNoteRef.current = hoveredNote;
+        smoothActiveQualityRef.current = hoveredQuality;
       }
     }
-
-    // Push to audio engine at full 60 fps (no React state!)
-    engineRef.current.update({
-      volume: smoothVolRef.current,
-      bpm:    smoothBPMRef.current,
-    });
 
     // Throttled UI flush
     const now = performance.now();
@@ -95,10 +199,16 @@ export default function App() {
       setRightDetected(g.rightHand.detected);
       setLeftDetected(g.leftHand.detected);
       setLandmarks(g.landmarks);
-      setVolume(smoothVolRef.current);
-      setBpm(Math.round(smoothBPMRef.current));
+      
+      if (activeModeRef.current === "conductor") {
+        setVolume(smoothVolRef.current);
+        setBpm(Math.round(smoothBPMRef.current));
+      } else {
+        setActiveNote(smoothActiveNoteRef.current);
+        setActiveQuality(smoothActiveQualityRef.current);
+      }
     }
-  }, [handleRestart, selectedSong]);
+  }, [handleRestart]);
 
   useHandTracking(videoRef, onGesture, trackingEnabled);
 
@@ -142,26 +252,42 @@ export default function App() {
   }, [isPlaying]);
 
   const handleStart = useCallback(async () => {
-    await engine.start(selectedSong);
+    if (activeMode === "conductor") {
+      await engine.start(selectedSong);
+    }
     setIsPlaying(true);
     setTrackingEnabled(true);
     setShowIntro(false);
-  }, [engine, selectedSong]);
+  }, [engine, selectedSong, activeMode]);
 
   const handleStop = useCallback(() => {
-    engine.stop();
+    if (activeMode === "conductor") {
+      engine.stop();
+    } else {
+      stopAll();
+    }
     setIsPlaying(false);
     setTrackingEnabled(false);
-  }, [engine]);
+  }, [engine, activeMode, stopAll]);
 
   const handleSongSelect = useCallback(async (song: Song) => {
-    engine.stop();
+    if (activeMode === "conductor") {
+      engine.stop();
+    }
     setSelectedSong(song);
     setIsPlaying(false);
     setTrackingEnabled(false);
     smoothBPMRef.current = song.bpmBase;
     setBpm(song.bpmBase);
-  }, [engine]);
+  }, [engine, activeMode]);
+
+  const handleModeChange = useCallback((mode: "conductor" | "instrument") => {
+    setActiveMode(mode);
+    engine.stop();
+    stopAll();
+    setIsPlaying(false);
+    setTrackingEnabled(false);
+  }, [engine, stopAll]);
 
   return (
     <div className="app-root">
@@ -191,20 +317,20 @@ export default function App() {
               }}
             />
             <h1 className="intro-title">Web Conductor</h1>
-            <p className="intro-subtitle">Dirige la música con el movimiento de tus manos</p>
+            <p className="intro-subtitle">Dirige la música o toca acordes con el movimiento de tus manos</p>
             <ul className="intro-features">
               <li>
-                <span>🔵</span>
+                <span>🎼</span>
                 <div>
-                  <strong>Mano izquierda</strong> (lado izquierdo de pantalla)<br />
-                  Sube = más volumen · Baja = menos volumen
+                  <strong>Modo Conductor</strong><br />
+                  Mano izq = volumen · Mano der = tempo/velocidad.
                 </div>
               </li>
               <li>
-                <span>🟣</span>
+                <span>🎹</span>
                 <div>
-                  <strong>Mano derecha</strong> (lado derecho de pantalla)<br />
-                  Sube = más rápido · Baja = más lento
+                  <strong>Modo Instrumento</strong><br />
+                  Mano izq = Nota base (rueda) · Mano der = Acorde (rueda).
                 </div>
               </li>
             </ul>
@@ -230,11 +356,31 @@ export default function App() {
           />
           <span className="header-title">Web Conductor</span>
         </div>
-        <div className="header-song" style={{ "--accent": selectedSong.color } as React.CSSProperties}>
-          <span>{selectedSong.emoji}</span>
-          <span>{selectedSong.name}</span>
-          <span className="header-artist">— {selectedSong.artist}</span>
+        
+        {/* Mode Selector Toggle */}
+        <div className="header-modes">
+          <button
+            className={`btn-mode-toggle ${activeMode === "conductor" ? "active" : ""}`}
+            onClick={() => handleModeChange("conductor")}
+          >
+            🎼 Conductor
+          </button>
+          <button
+            className={`btn-mode-toggle ${activeMode === "instrument" ? "active" : ""}`}
+            onClick={() => handleModeChange("instrument")}
+          >
+            🎹 Instrumento
+          </button>
         </div>
+
+        {activeMode === "conductor" && (
+          <div className="header-song" style={{ "--accent": selectedSong.color } as React.CSSProperties}>
+            <span>{selectedSong.emoji}</span>
+            <span>{selectedSong.name}</span>
+            <span className="header-artist">— {selectedSong.artist}</span>
+          </div>
+        )}
+
         <div className="header-actions">
           <button
             id="btn-help"
@@ -259,20 +405,42 @@ export default function App() {
       <main className="app-main">
         <section className="panel-webcam">
           <h2 className="panel-heading">📷 Cámara</h2>
-          <WebcamPreview videoRef={videoRef} landmarkerResult={landmarks} getLevel={engine.getLevel} />
+          <WebcamPreview 
+            videoRef={videoRef} 
+            landmarkerResult={landmarks} 
+            getLevel={engine.getLevel}
+            mode={activeMode}
+            snap={snapEnabled}
+          />
         </section>
 
-        <ConductorDashboard
-          songs={SONGS}
-          selectedSong={selectedSong}
-          onSelect={handleSongSelect}
-          bpm={bpm}
-          volume={volume}
-          isPlaying={isPlaying}
-          screenLeftDetected={leftDetected}
-          screenRightDetected={rightDetected}
-          vuBarsRef={vuBarsRef}
-        />
+        {activeMode === "conductor" ? (
+          <ConductorDashboard
+            songs={SONGS}
+            selectedSong={selectedSong}
+            onSelect={handleSongSelect}
+            bpm={bpm}
+            volume={volume}
+            isPlaying={isPlaying}
+            screenLeftDetected={leftDetected}
+            screenRightDetected={rightDetected}
+            vuBarsRef={vuBarsRef}
+          />
+        ) : (
+          <InstrumentDashboard
+            activeNote={activeNote}
+            activeQuality={activeQuality}
+            waveform={synthWaveform}
+            setWaveform={handleWaveformChange}
+            octave={synthOctave}
+            setOctave={setSynthOctave}
+            snap={snapEnabled}
+            setSnap={setSnapEnabled}
+            isPlaying={isPlaying}
+            screenLeftDetected={leftDetected}
+            screenRightDetected={rightDetected}
+          />
+        )}
       </main>
 
       {/* ── Help Modal ── */}
@@ -305,31 +473,62 @@ export default function App() {
                 filter: "drop-shadow(0 0 8px rgba(116, 172, 223, 0.3))"
               }}
             />
-            <h2 className="intro-title" style={{ marginBottom: "20px" }}>Instrucciones de Dirección</h2>
             
-            <ul className="intro-features" style={{ marginBottom: "24px" }}>
-              <li>
-                <span>🔵</span>
-                <div>
-                  <strong>Mano Izquierda (Volumen)</strong><br />
-                  Aparece en el lado izquierdo de la pantalla. Sube para aumentar el volumen (hasta 100%) y baja para atenuar (hasta silencio).
-                </div>
-              </li>
-              <li>
-                <span>🟣</span>
-                <div>
-                  <strong>Mano Derecha (Tempo)</strong><br />
-                  Aparece en el lado derecho de la pantalla. Sube para acelerar la velocidad de reproducción y baja para ir más lento.
-                </div>
-              </li>
-              <li>
-                <span>✊</span>
-                <div>
-                  <strong>Puño Cerrado Derecho (Reiniciar)</strong><br />
-                  Cierra el puño de tu mano derecha (lado de tempo) para reiniciar la canción al instante al volumen y tempo originales.
-                </div>
-              </li>
-            </ul>
+            {activeMode === "conductor" ? (
+              <>
+                <h2 className="intro-title" style={{ marginBottom: "20px" }}>Instrucciones del Director</h2>
+                <ul className="intro-features" style={{ marginBottom: "24px" }}>
+                  <li>
+                    <span>🔵</span>
+                    <div>
+                      <strong>Mano Izquierda (Volumen)</strong><br />
+                      Aparece en el lado izquierdo de la pantalla. Sube para aumentar el volumen (hasta 100%) y baja para atenuar (hasta silencio).
+                    </div>
+                  </li>
+                  <li>
+                    <span>🟣</span>
+                    <div>
+                      <strong>Mano Derecha (Tempo)</strong><br />
+                      Aparece en el lado derecho de la pantalla. Sube para acelerar la velocidad de reproducción y baja para ir más lento.
+                    </div>
+                  </li>
+                  <li>
+                    <span>✊</span>
+                    <div>
+                      <strong>Puño Cerrado Derecho (Reiniciar)</strong><br />
+                      Cierra el puño de tu mano derecha (lado de tempo) para reiniciar la canción al instante al volumen y tempo originales.
+                    </div>
+                  </li>
+                </ul>
+              </>
+            ) : (
+              <>
+                <h2 className="intro-title" style={{ marginBottom: "20px" }}>Instrucciones del Instrumento</h2>
+                <ul className="intro-features" style={{ marginBottom: "24px" }}>
+                  <li>
+                    <span>🔵</span>
+                    <div>
+                      <strong>Mano Izquierda / Rueda Izquierda (Nota Base)</strong><br />
+                      Ubica la punta de tu dedo índice en los sectores de la rueda de notas para seleccionar la nota raíz (C, D, E...). Colócalo en el círculo central "OFF" para silenciar.
+                    </div>
+                  </li>
+                  <li>
+                    <span>🟡</span>
+                    <div>
+                      <strong>Mano Derecha / Rueda Derecha (Acorde)</strong><br />
+                      Ubica el índice de tu otra mano en la rueda de acordes para seleccionar su tipo/calidad (maj, min, 7...). En el círculo central "OFF" se tocará la nota simple sin acorde.
+                    </div>
+                  </li>
+                  <li>
+                    <span>🎛️</span>
+                    <div>
+                      <strong>Ajustes de Sonido</strong><br />
+                      Cambia la forma de onda del sintetizador y la octava base desde el panel de control lateral derecho.
+                    </div>
+                  </li>
+                </ul>
+              </>
+            )}
             
             <button className="btn-primary" style={{ width: "100%", justifyContent: "center" }} onClick={() => setShowHelp(false)}>
               Entendido
