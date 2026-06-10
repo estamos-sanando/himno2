@@ -38,8 +38,15 @@ export function useHandTracking(
   const startCamera = useCallback(async () => {
     if (!videoRef.current) return;
     try {
+      // 480x360 = 57% fewer pixels than 640x480 for MediaPipe to process each frame.
+      // Still sharp enough for landmark detection; improves fps on mid-range GPUs.
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: "user" },
+        video: {
+          width:  { ideal: 480, max: 640 },
+          height: { ideal: 360, max: 480 },
+          frameRate: { ideal: 30, max: 30 },
+          facingMode: "user",
+        },
       });
       videoRef.current.srcObject = stream;
       await videoRef.current.play();
@@ -77,8 +84,10 @@ export function useHandTracking(
     const now = performance.now();
     let result = lastResultRef.current;
 
-    // Throttle hand detection to ~30 FPS (every 33ms) to save CPU/GPU cycles and keep it extremely fluid
-    if (now - lastDetectionTimeRef.current >= 33) {
+    // Throttle hand detection to 25 FPS (every 40ms).
+    // 25fps gives MediaPipe more CPU budget per frame vs 30fps
+    // while still being imperceptible to the user.
+    if (now - lastDetectionTimeRef.current >= 40) {
       result = lm.detectForVideo(video, now);
       lastResultRef.current = result;
       lastDetectionTimeRef.current = now;
@@ -90,24 +99,26 @@ export function useHandTracking(
     if (result && result.handednesses && result.landmarks) {
       for (let i = 0; i < result.handednesses.length; i++) {
         const category = result.handednesses[i][0].categoryName;
-        const wristY   = result.landmarks[i][0].y;
         const marks    = result.landmarks[i];
+        const wristY   = marks[0].y;
 
-        // Check if hand is open or closed (fingers extended relative to wrist)
+        // Gesture classification with squared-distance (no sqrt needed)
         let isOpen = false;
         let isClosed = false;
         if (marks && marks.length >= 21) {
-          const wrist = marks[0];
-          const dist = (p1: any, p2: any) => Math.hypot(p1.x - p2.x, p1.y - p2.y);
-          const isIndexExtended  = dist(marks[8], wrist)  > dist(marks[6], wrist);
-          const isMiddleExtended = dist(marks[12], wrist) > dist(marks[10], wrist);
-          const isRingExtended   = dist(marks[16], wrist)   > dist(marks[14], wrist);
-          const isPinkyExtended  = dist(marks[20], wrist)  > dist(marks[18], wrist);
-          isOpen = isIndexExtended && isMiddleExtended && isRingExtended && isPinkyExtended;
+          const wx = marks[0].x;
+          const wy = marks[0].y;
+          const dist2 = (ax: number, ay: number, bx: number, by: number) =>
+            (ax - bx) * (ax - bx) + (ay - by) * (ay - by);
+
+          const isIndexExtended  = dist2(marks[8].x,  marks[8].y,  wx, wy) > dist2(marks[6].x,  marks[6].y,  wx, wy);
+          const isMiddleExtended = dist2(marks[12].x, marks[12].y, wx, wy) > dist2(marks[10].x, marks[10].y, wx, wy);
+          const isRingExtended   = dist2(marks[16].x, marks[16].y, wx, wy) > dist2(marks[14].x, marks[14].y, wx, wy);
+          const isPinkyExtended  = dist2(marks[20].x, marks[20].y, wx, wy) > dist2(marks[18].x, marks[18].y, wx, wy);
+          isOpen   = isIndexExtended && isMiddleExtended && isRingExtended && isPinkyExtended;
           isClosed = !isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended;
         }
 
-        // "Right" from MediaPipe = user's physical right hand (screen-LEFT in mirror)
         if (category === "Right") {
           rightHand = { detected: true, y: wristY, isOpen, isClosed };
         } else {

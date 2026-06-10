@@ -97,6 +97,8 @@ button {
   border-bottom: 1px solid var(--border-glass);
   flex-shrink: 0;
   z-index: 10;
+  /* Isolate header compositing from canvas layer below */
+  will-change: backdrop-filter;
 }
 
 .header-brand {
@@ -251,6 +253,9 @@ button {
   border-right: 1px solid var(--border-glass);
   display: flex;
   flex-direction: column;
+  /* Promote to own compositor layer so canvas repaints don’t invalidate the sidebar */
+  contain: layout style;
+  will-change: contents;
 }
 
 .panel-heading {
@@ -282,6 +287,11 @@ button {
   height: 100%;
   object-fit: cover;
   display: block;
+  /* GPU-accelerated compositing for the canvas — avoids CPU readback */
+  will-change: transform;
+  /* Crisp nearest-neighbour upscale avoids browser bilinear blur on canvas */
+  image-rendering: auto;
+  transform: translateZ(0); /* force GPU layer even without explicit animation */
 }
 
 .webcam-legend {

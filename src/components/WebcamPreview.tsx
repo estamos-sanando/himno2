@@ -10,6 +10,10 @@ interface Props {
   snap?: boolean;
 }
 
+// Offscreen canvas cache for wheel layers (avoid redrawing 18+ arcs every frame)
+const VW = 640;
+const VH = 480;
+
 // Cyan = screen-LEFT hand  (physical right) → Volume / Notes
 // Purple = screen-RIGHT hand (physical left) → Tempo / Chord Qualities
 const SCREEN_LEFT_COLOR  = "#74ACDF"; // Celestial Blue
@@ -36,9 +40,17 @@ export default function WebcamPreview({
   snap = true
 }: Props) {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
+  // Cache the 2D context — getContext() is NOT free
+  const ctxRef       = useRef<CanvasRenderingContext2D | null>(null);
   const trailRef     = useRef<{ x: number; y: number }[]>([]);
   const landmarksRef = useRef<HandLandmarkerResult | null>(null);
   landmarksRef.current = landmarkerResult;
+
+  // Offscreen canvases for instrument wheel layers (redrawn only on active change)
+  const noteWheelOffRef  = useRef<OffscreenCanvas | null>(null);
+  const chordWheelOffRef = useRef<OffscreenCanvas | null>(null);
+  const lastActiveLeftRef  = useRef<number | "OFF" | null>(undefined as any);
+  const lastActiveRightRef = useRef<number | "OFF" | null>(undefined as any);
 
   useEffect(() => {
     let rafId: number;
@@ -49,16 +61,24 @@ export default function WebcamPreview({
       if (!canvas || !video || video.readyState < 2) {
         rafId = requestAnimationFrame(loop); return;
       }
-      const ctx = canvas.getContext("2d");
+
+      // Initialise context once
+      if (!ctxRef.current) {
+        ctxRef.current = canvas.getContext("2d", { alpha: false }) ?? null;
+      }
+      const ctx = ctxRef.current;
       if (!ctx) { rafId = requestAnimationFrame(loop); return; }
 
-      // Standard coordinate space of 640x480 for consistent math
-      const vw = 640;
-      const vh = 480;
-      if (canvas.width !== vw || canvas.height !== vh) {
-        canvas.width  = vw;
-        canvas.height = vh;
+      // Fixed coordinate space 640×480 for consistent math
+      if (canvas.width !== VW || canvas.height !== VH) {
+        canvas.width  = VW;
+        canvas.height = VH;
+        ctxRef.current = null; // context invalidated on resize
+        rafId = requestAnimationFrame(loop);
+        return;
       }
+      const vw = VW;
+      const vh = VH;
 
       // ── Draw video (MIRRORED horizontally for selfie view) ──
       ctx.save();
@@ -101,23 +121,25 @@ export default function WebcamPreview({
       let activeRightIdx: number | "OFF" | null = null;
 
       if (mode === "instrument") {
-        const cxL = vw * 0.25; // 160
-        const cyL = vh * 0.5;  // 240
-        const cxR = vw * 0.75; // 480
-        const cyR = vh * 0.5;  // 240
+        const cxL = 160; // vw * 0.25
+        const cyL = 240; // vh * 0.5
+        const cxR = 480; // vw * 0.75
+        const cyR = 240; // vh * 0.5
         const R = 125;
         const rInner = 44;
+        const PI2 = Math.PI * 2;
+        const HALF_PI = Math.PI / 2;
 
         // 1. Check collisions for Note Wheel (Left)
         if (leftFingerPos) {
-          const dist = Math.hypot(leftFingerPos.x - cxL, leftFingerPos.y - cyL);
-          if (dist <= R) {
-            if (dist < rInner) {
+          const dx = leftFingerPos.x - cxL;
+          const dy = leftFingerPos.y - cyL;
+          const dist2 = dx * dx + dy * dy;
+          if (dist2 <= R * R) {
+            if (dist2 < rInner * rInner) {
               activeLeftIdx = "OFF";
             } else {
-              const angle = Math.atan2(leftFingerPos.y - cyL, leftFingerPos.x - cxL);
-              // Center C at 12 o'clock (add Math.PI / 12 for half slice offset)
-              const angNorm = (angle + Math.PI / 2 + Math.PI / 12 + 2 * Math.PI) % (2 * Math.PI);
+              const angNorm = (Math.atan2(dy, dx) + HALF_PI + Math.PI / 12 + PI2) % PI2;
               activeLeftIdx = Math.floor(angNorm / (Math.PI / 6));
             }
           }
@@ -125,119 +147,114 @@ export default function WebcamPreview({
 
         // 2. Check collisions for Chord Wheel (Right)
         if (rightFingerPos) {
-          const dist = Math.hypot(rightFingerPos.x - cxR, rightFingerPos.y - cyR);
-          if (dist <= R) {
-            if (dist < rInner) {
+          const dx = rightFingerPos.x - cxR;
+          const dy = rightFingerPos.y - cyR;
+          const dist2 = dx * dx + dy * dy;
+          if (dist2 <= R * R) {
+            if (dist2 < rInner * rInner) {
               activeRightIdx = "OFF";
             } else {
-              const angle = Math.atan2(rightFingerPos.y - cyR, rightFingerPos.x - cxR);
-              // Center maj at 12 o'clock (add Math.PI / 6 for half slice offset)
-              const angNorm = (angle + Math.PI / 2 + Math.PI / 6 + 2 * Math.PI) % (2 * Math.PI);
+              const angNorm = (Math.atan2(dy, dx) + HALF_PI + Math.PI / 6 + PI2) % PI2;
               activeRightIdx = Math.floor(angNorm / (Math.PI / 3));
             }
           }
         }
 
-        // ── Draw Note Wheel (Left) ──
-        ctx.save();
-        ctx.shadowBlur = 0;
-        ctx.strokeStyle = "rgba(255,255,255,0.15)";
-        ctx.lineWidth = 1.5;
-
-        for (let i = 0; i < 12; i++) {
-          const sliceAngle = Math.PI / 6;
-          const startAngle = -Math.PI / 2 + i * sliceAngle - sliceAngle / 2;
-          const endAngle = startAngle + sliceAngle;
-          const isActive = activeLeftIdx === i;
-
-          ctx.beginPath();
-          ctx.arc(cxL, cyL, R, startAngle, endAngle);
-          ctx.arc(cxL, cyL, rInner, endAngle, startAngle, true);
-          ctx.closePath();
-
-          if (isActive) {
-            ctx.fillStyle = "rgba(116, 172, 223, 0.55)";
-            ctx.fill();
-            ctx.stroke();
-          } else {
-            ctx.fillStyle = "rgba(20, 20, 20, 0.45)";
-            ctx.fill();
-            ctx.stroke();
-          }
-
-          // Text labels
-          const textAngle = startAngle + sliceAngle / 2;
+        // ── Draw wheels via cached offscreen canvases ──
+        // Only re-render when the active sector changes (huge saving at 60fps)
+        const drawNoteWheel = (offCtx: OffscreenCanvasRenderingContext2D, active: number | "OFF" | null) => {
+          offCtx.clearRect(0, 0, VW, VH);
+          offCtx.strokeStyle = "rgba(255,255,255,0.15)";
+          offCtx.lineWidth = 1.5;
+          offCtx.textAlign = "center";
+          offCtx.textBaseline = "middle";
+          const SLICE = Math.PI / 6;
           const textDist = rInner + (R - rInner) * 0.6;
-          const tx = cxL + Math.cos(textAngle) * textDist;
-          const ty = cyL + Math.sin(textAngle) * textDist;
+          for (let i = 0; i < 12; i++) {
+            const start = -Math.PI / 2 + i * SLICE - SLICE / 2;
+            const end = start + SLICE;
+            const isActive = active === i;
+            offCtx.beginPath();
+            offCtx.arc(cxL, cyL, R, start, end);
+            offCtx.arc(cxL, cyL, rInner, end, start, true);
+            offCtx.closePath();
+            offCtx.fillStyle = isActive ? "rgba(116,172,223,0.55)" : "rgba(20,20,20,0.45)";
+            offCtx.fill();
+            offCtx.stroke();
+            const ta = start + SLICE / 2;
+            const tx = cxL + Math.cos(ta) * textDist;
+            const ty = cyL + Math.sin(ta) * textDist;
+            offCtx.fillStyle = isActive ? "#ffffff" : "rgba(255,255,255,0.75)";
+            offCtx.font = isActive ? "bold 15px Outfit,Inter,sans-serif" : "bold 12px Outfit,Inter,sans-serif";
+            offCtx.fillText(CHROMATIC[i], tx, ty);
+          }
+          // Center OFF
+          offCtx.beginPath();
+          offCtx.arc(cxL, cyL, rInner, 0, Math.PI * 2);
+          offCtx.fillStyle = active === "OFF" ? "rgba(116,172,223,0.65)" : "rgba(10,10,10,0.8)";
+          offCtx.fill();
+          offCtx.stroke();
+          offCtx.fillStyle = "#ffffff";
+          offCtx.font = "bold 11px Outfit,Inter,sans-serif";
+          offCtx.fillText("OFF", cxL, cyL);
+        };
 
-          ctx.fillStyle = isActive ? "#ffffff" : "rgba(255, 255, 255, 0.75)";
-          ctx.font = isActive ? "bold 15px Outfit, Inter, sans-serif" : "bold 12px Outfit, Inter, sans-serif";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText(CHROMATIC[i], tx, ty);
+        const drawChordWheel = (offCtx: OffscreenCanvasRenderingContext2D, active: number | "OFF" | null) => {
+          offCtx.clearRect(0, 0, VW, VH);
+          offCtx.strokeStyle = "rgba(255,255,255,0.15)";
+          offCtx.lineWidth = 1.5;
+          offCtx.textAlign = "center";
+          offCtx.textBaseline = "middle";
+          const SLICE = Math.PI / 3;
+          const textDist = rInner + (R - rInner) * 0.6;
+          for (let i = 0; i < 6; i++) {
+            const start = -Math.PI / 2 + i * SLICE - SLICE / 2;
+            const end = start + SLICE;
+            const isActive = active === i;
+            offCtx.beginPath();
+            offCtx.arc(cxR, cyR, R, start, end);
+            offCtx.arc(cxR, cyR, rInner, end, start, true);
+            offCtx.closePath();
+            offCtx.fillStyle = isActive ? "rgba(246,184,0,0.55)" : "rgba(20,20,20,0.45)";
+            offCtx.fill();
+            offCtx.stroke();
+            const ta = start + SLICE / 2;
+            const tx = cxR + Math.cos(ta) * textDist;
+            const ty = cyR + Math.sin(ta) * textDist;
+            offCtx.fillStyle = isActive ? "#ffffff" : "rgba(255,255,255,0.75)";
+            offCtx.font = isActive ? "bold 14px Outfit,Inter,sans-serif" : "bold 11px Outfit,Inter,sans-serif";
+            offCtx.fillText(CHORD_QUALITIES[i], tx, ty);
+          }
+          // Center OFF
+          offCtx.beginPath();
+          offCtx.arc(cxR, cyR, rInner, 0, Math.PI * 2);
+          offCtx.fillStyle = active === "OFF" ? "rgba(246,184,0,0.65)" : "rgba(10,10,10,0.8)";
+          offCtx.fill();
+          offCtx.stroke();
+          offCtx.fillStyle = "#ffffff";
+          offCtx.font = "bold 11px Outfit,Inter,sans-serif";
+          offCtx.fillText("OFF", cxR, cyR);
+        };
+
+        // Initialise offscreen canvases once
+        if (!noteWheelOffRef.current) noteWheelOffRef.current  = new OffscreenCanvas(VW, VH);
+        if (!chordWheelOffRef.current) chordWheelOffRef.current = new OffscreenCanvas(VW, VH);
+
+        // Invalidate cache only when active sector changes
+        if (activeLeftIdx !== lastActiveLeftRef.current) {
+          lastActiveLeftRef.current = activeLeftIdx;
+          const offCtx = noteWheelOffRef.current.getContext("2d") as OffscreenCanvasRenderingContext2D;
+          if (offCtx) drawNoteWheel(offCtx, activeLeftIdx);
+        }
+        if (activeRightIdx !== lastActiveRightRef.current) {
+          lastActiveRightRef.current = activeRightIdx;
+          const offCtx = chordWheelOffRef.current.getContext("2d") as OffscreenCanvasRenderingContext2D;
+          if (offCtx) drawChordWheel(offCtx, activeRightIdx);
         }
 
-        // Draw Left Center (OFF)
-        ctx.beginPath();
-        ctx.arc(cxL, cyL, rInner, 0, Math.PI * 2);
-        ctx.fillStyle = activeLeftIdx === "OFF" ? "rgba(116, 172, 223, 0.65)" : "rgba(10, 10, 10, 0.8)";
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 11px Outfit, Inter, sans-serif";
-        ctx.fillText("OFF", cxL, cyL);
-        ctx.restore();
-
-        // ── Draw Chord Wheel (Right) ──
-        ctx.save();
-        ctx.strokeStyle = "rgba(255,255,255,0.15)";
-        ctx.lineWidth = 1.5;
-
-        for (let i = 0; i < 6; i++) {
-          const sliceAngle = Math.PI / 3;
-          const startAngle = -Math.PI / 2 + i * sliceAngle - sliceAngle / 2;
-          const endAngle = startAngle + sliceAngle;
-          const isActive = activeRightIdx === i;
-
-          ctx.beginPath();
-          ctx.arc(cxR, cyR, R, startAngle, endAngle);
-          ctx.arc(cxR, cyR, rInner, endAngle, startAngle, true);
-          ctx.closePath();
-
-          if (isActive) {
-            ctx.fillStyle = "rgba(246, 184, 0, 0.55)";
-            ctx.fill();
-            ctx.stroke();
-          } else {
-            ctx.fillStyle = "rgba(20, 20, 20, 0.45)";
-            ctx.fill();
-            ctx.stroke();
-          }
-
-          // Text labels
-          const textAngle = startAngle + sliceAngle / 2;
-          const textDist = rInner + (R - rInner) * 0.6;
-          const tx = cxR + Math.cos(textAngle) * textDist;
-          const ty = cyR + Math.sin(textAngle) * textDist;
-
-          ctx.fillStyle = isActive ? "#ffffff" : "rgba(255, 255, 255, 0.75)";
-          ctx.font = isActive ? "bold 14px Outfit, Inter, sans-serif" : "bold 11px Outfit, Inter, sans-serif";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText(CHORD_QUALITIES[i], tx, ty);
-        }
-
-        // Draw Right Center (OFF)
-        ctx.beginPath();
-        ctx.arc(cxR, cyR, rInner, 0, Math.PI * 2);
-        ctx.fillStyle = activeRightIdx === "OFF" ? "rgba(246, 184, 0, 0.65)" : "rgba(10, 10, 10, 0.8)";
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 11px Outfit, Inter, sans-serif";
-        ctx.fillText("OFF", cxR, cyR);
-        ctx.restore();
+        // Blit offscreen canvases (single drawImage — very cheap)
+        ctx.drawImage(noteWheelOffRef.current, 0, 0);
+        ctx.drawImage(chordWheelOffRef.current, 0, 0);
 
         // ── Draw snap lines & indicators ──
         if (leftFingerPos && activeLeftIdx !== null) {
@@ -257,13 +274,14 @@ export default function WebcamPreview({
           }
 
           // Connecting line
-          ctx.strokeStyle = "rgba(116, 172, 223, 0.7)";
+          ctx.strokeStyle = "rgba(116,172,223,0.7)";
           ctx.lineWidth = 2.5;
           ctx.setLineDash([4, 4]);
           ctx.beginPath();
           ctx.moveTo(cxL, cyL);
           ctx.lineTo(targetX, targetY);
           ctx.stroke();
+          ctx.setLineDash([]); // always reset dash state
 
           // Target cursor
           ctx.beginPath();
@@ -293,13 +311,14 @@ export default function WebcamPreview({
           }
 
           // Connecting line
-          ctx.strokeStyle = "rgba(246, 184, 0, 0.7)";
+          ctx.strokeStyle = "rgba(246,184,0,0.7)";
           ctx.lineWidth = 2.5;
           ctx.setLineDash([4, 4]);
           ctx.beginPath();
           ctx.moveTo(cxR, cyR);
           ctx.lineTo(targetX, targetY);
           ctx.stroke();
+          ctx.setLineDash([]); // always reset dash state
 
           // Target cursor
           ctx.beginPath();

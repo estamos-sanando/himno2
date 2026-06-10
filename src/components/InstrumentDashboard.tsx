@@ -202,8 +202,8 @@ export default function InstrumentDashboard({
             <label style={{ fontSize: "11px", color: "var(--text-secondary)", display: "block", marginBottom: "6px" }}>
               FORMA DE ONDA
             </label>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px" }}>
-              {(["sine", "triangle", "sawtooth", "square"] as WaveformType[]).map(w => (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "6px" }}>
+              {(["piano", "sine", "triangle", "sawtooth", "square"] as WaveformType[]).map(w => (
                 <button
                   key={w}
                   onClick={() => setWaveform(w)}
@@ -219,10 +219,11 @@ export default function InstrumentDashboard({
                     transition: "all 0.15s ease"
                   }}
                 >
-                  {w === "sine" && "Senoidal"}
+                  {w === "piano"    && "🎹 Piano"}
+                  {w === "sine"     && "Senoidal"}
                   {w === "triangle" && "Triang."}
                   {w === "sawtooth" && "Sierra"}
-                  {w === "square" && "Cuadrada"}
+                  {w === "square"   && "Cuadrada"}
                 </button>
               ))}
             </div>

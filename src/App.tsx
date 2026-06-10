@@ -31,7 +31,7 @@ export default function App() {
 
   // Mode selection & instrument synth configurations
   const [activeMode, setActiveMode] = useState<"conductor" | "instrument">("conductor");
-  const [synthWaveform, setSynthWaveform] = useState<WaveformType>("sine");
+  const [synthWaveform, setSynthWaveform] = useState<WaveformType>("piano");
   const [synthOctave, setSynthOctave] = useState<number>(4);
   const [snapEnabled, setSnapEnabled] = useState<boolean>(true);
   const [activeNote, setActiveNote] = useState<string | null>(null);
