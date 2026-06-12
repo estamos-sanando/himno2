@@ -584,13 +584,53 @@
       inset: 0;
       width: 100%;
       height: 100%;
-      object-fit: contain;
+      object-fit: cover;
       object-position: center;
       pointer-events: none;
       opacity: 1;
       will-change: transform;
       transform: translateZ(0);
       z-index: 3;
+    }
+
+    .svl-btn-ingresar {
+      position: absolute;
+      bottom: clamp(80px, 15vh, 140px);
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      background: linear-gradient(135deg, rgba(116,172,223,0.15) 0%, rgba(116,172,223,0.05) 100%);
+      border: 1px solid rgba(116,172,223,0.5);
+      border-radius: 30px;
+      padding: 14px 48px;
+      color: #ffffff;
+      font-family: inherit;
+      font-size: clamp(13px, 1.8vw, 15px);
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      cursor: pointer;
+      box-shadow: 0 0 20px rgba(116,172,223,0.2), inset 0 0 10px rgba(116,172,223,0.1);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      opacity: 0;
+      animation: svl-btn-fadein 1s ease forwards, svl-btn-pulse 2s infinite alternate;
+    }
+
+    .svl-btn-ingresar:hover {
+      background: linear-gradient(135deg, rgba(116,172,223,0.3) 0%, rgba(116,172,223,0.1) 100%);
+      border: 1px solid rgba(116,172,223,0.8);
+      box-shadow: 0 0 30px rgba(116,172,223,0.5), inset 0 0 15px rgba(116,172,223,0.2);
+      transform: translateX(-50%) scale(1.05);
+    }
+
+    @keyframes svl-btn-fadein {
+      from { opacity: 0; transform: translate(-50%, 15px); }
+      to { opacity: 1; transform: translate(-50%, 0); }
+    }
+
+    @keyframes svl-btn-pulse {
+      0% { box-shadow: 0 0 20px rgba(116,172,223,0.2), inset 0 0 10px rgba(116,172,223,0.1); }
+      100% { box-shadow: 0 0 30px rgba(116,172,223,0.4), inset 0 0 15px rgba(116,172,223,0.2); }
     }
 
     
@@ -903,9 +943,11 @@
         <div class="svl-band" style="top:0;animation:svl-band 4s ease-in-out infinite;"></div>
         <div class="svl-band" style="bottom:0;animation:svl-band 4s ease-in-out 0.5s infinite;"></div>
         <!-- Video (loads over the image) -->
-        <video id="scroll-video-logo" muted playsinline preload="auto" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center;z-index:3;opacity:0;transition:opacity 0.6s ease;pointer-events:none;will-change:transform;transform:translateZ(0);"></video>
+        <video id="scroll-video-logo" muted playsinline preload="auto" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;z-index:3;opacity:0;transition:opacity 0.6s ease;pointer-events:none;will-change:transform;transform:translateZ(0);"></video>
         <!-- Vignette -->
         <div class="svl-vignette"></div>
+        <!-- Enter button -->
+        <button id="btn-ingresar" class="svl-btn-ingresar">Ingresar</button>
         <!-- Scroll indicator -->
         <div id="scroll-prompt" style="position:absolute;bottom:clamp(22px,4.5vh,48px);left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:10px;pointer-events:none;z-index:6;color:#74acdf;transition:opacity 0.3s ease;opacity:0;">
           <div style="width:20px;height:32px;border:2px solid rgba(116,172,223,0.8);border-radius:12px;display:flex;justify-content:center;padding-top:6px;box-sizing:border-box;box-shadow:0 0 12px rgba(116,172,223,0.4);">
@@ -1243,6 +1285,7 @@
     window.addEventListener("keydown", (e) => {
       if (e.key === "ArrowUp" || e.key === "ArrowDown") {
         e.preventDefault();
+        svlPrime();
         svlKeysPressed[e.key] = true;
       }
     });
@@ -1290,6 +1333,16 @@
       introOverlay.addEventListener("click", () => {
         svlTarget = Math.min(1, svlTarget + 0.15);
       });
+
+      // Enter button click listener
+      const btnIngresar = document.getElementById("btn-ingresar");
+      if (btnIngresar) {
+        btnIngresar.addEventListener("click", (e) => {
+          e.stopPropagation();
+          svlPrime();
+          startExperience();
+        });
+      }
     }
 
     function svlTick() {
@@ -1345,10 +1398,7 @@
           svlPrompt.style.opacity = p < 0.2 ? String(1 - p * 5) : "0";
         }
 
-        if (p >= 0.93 && !svlEntered) {
-          svlEntered = true;
-          startExperience();
-        }
+        // Auto-enter disabled, user must click the "Ingresar" button
       }
       requestAnimationFrame(svlTick);
     }

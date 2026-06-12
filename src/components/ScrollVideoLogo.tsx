@@ -16,11 +16,12 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
   const lastSeekT   = useRef(-1);
   const lastSeekTime = useRef(0);
   const rafId       = useRef(0);
-  const entered     = useRef(false);
   const durRef      = useRef(0);
   const videoLoaded = useRef(false);
   const videoErrored = useRef(false);
   const keysPressed = useRef<{ [key: string]: boolean }>({});
+
+  const primedRef = useRef(false);
 
   const revealVideo = useCallback(() => {
     if (videoErrored.current) return;
@@ -29,6 +30,16 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
       videoRef.current.style.opacity = "1";
     }
   }, []);
+
+  const prime = useCallback(() => {
+    if (primedRef.current) return;
+    primedRef.current = true;
+    revealVideo();
+    const v = videoRef.current;
+    if (v) {
+      v.play().then(() => setTimeout(() => v.pause(), 40)).catch(() => {});
+    }
+  }, [revealVideo]);
 
   // ── VIDEO INIT ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -76,6 +87,7 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "ArrowUp" || e.key === "ArrowDown") {
         e.preventDefault();
+        prime();
         keysPressed.current[e.key] = true;
       }
     };
@@ -90,23 +102,12 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup",   handleKeyUp);
     };
-  }, []);
+  }, [prime]);
 
   // ── SCROLL / TOUCH ──────────────────────────────────────────────────────
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-
-    let primed = false;
-    const prime = () => {
-      if (primed) return;
-      primed = true;
-      revealVideo();
-      const v = videoRef.current;
-      if (v) {
-        v.play().then(() => setTimeout(() => v.pause(), 40)).catch(() => {});
-      }
-    };
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -131,6 +132,7 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
     };
     // Click/tap to progress (mobile fallback)
     const onClick = () => {
+      prime();
       targetProg.current = Math.min(1, targetProg.current + 0.15);
     };
 
@@ -144,17 +146,13 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
       el.removeEventListener("touchmove",  onTouchMove);
       el.removeEventListener("click",      onClick);
     };
-  }, [revealVideo]);
+  }, [prime]);
 
   // ── rAF LOOP ────────────────────────────────────────────────────────────
   useEffect(() => {
     const tick = () => {
-      // Keyboard input handling
+      // Keyboard input handling (ArrowUp increases progress to disassemble, ArrowDown decreases to assemble)
       if (keysPressed.current["ArrowUp"]) {
-        const v = videoRef.current;
-        if (v) {
-          v.play().then(() => setTimeout(() => v.pause(), 40)).catch(() => {});
-        }
         targetProg.current = Math.min(1, targetProg.current + 0.008);
       }
       if (keysPressed.current["ArrowDown"]) {
@@ -207,18 +205,12 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
         // Fade indicator
         if (promptRef.current)
           promptRef.current.style.opacity = p < 0.2 ? String(1 - p * 5) : "0";
-
-        // Auto-enter
-        if (p >= 0.93 && !entered.current) {
-          entered.current = true;
-          onStart();
-        }
       }
       rafId.current = requestAnimationFrame(tick);
     };
     rafId.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId.current);
-  }, [onStart, revealVideo]);
+  }, [revealVideo]);
 
   // ── RENDER ───────────────────────────────────────────────────────────────
   return (
@@ -267,7 +259,7 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
 
       {/* No fallback image - use video directly */}
 
-      {/* Video — loads in background, fades in over image if it works */}
+      {/* Video — loads in background, covers background completely */}
       <video
         ref={videoRef}
         src="/logo.mp4"
@@ -276,7 +268,7 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
         preload="auto"
         style={{
           position: "absolute", inset: 0, width: "100%", height: "100%",
-          objectFit: "contain", objectPosition: "center",
+          objectFit: "cover", objectPosition: "center",
           pointerEvents: "none", zIndex: 3, opacity: 0,
           transition: "opacity 0.6s ease",
           willChange: "transform", transform: "translateZ(0)",
@@ -288,6 +280,46 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
         position: "absolute", inset: 0, zIndex: 4, pointerEvents: "none",
         background: "radial-gradient(ellipse 75% 75% at 50% 48%, transparent 25%, rgba(4,8,16,0.75) 100%)",
       }} />
+
+      {/* Enter button */}
+      <button
+        onClick={onStart}
+        style={{
+          position: "absolute",
+          bottom: "clamp(80px, 15vh, 140px)",
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 10,
+          background: "linear-gradient(135deg, rgba(116,172,223,0.15) 0%, rgba(116,172,223,0.05) 100%)",
+          border: "1px solid rgba(116,172,223,0.5)",
+          borderRadius: "30px",
+          padding: "14px 48px",
+          color: "#ffffff",
+          fontFamily: "inherit",
+          fontSize: "clamp(13px, 1.8vw, 15px)",
+          fontWeight: 700,
+          letterSpacing: "3px",
+          textTransform: "uppercase",
+          cursor: "pointer",
+          boxShadow: "0 0 20px rgba(116,172,223,0.2), inset 0 0 10px rgba(116,172,223,0.1)",
+          transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+          animation: "svl-btn-fadein 1s ease forwards, svl-btn-pulse 2s infinite alternate",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "linear-gradient(135deg, rgba(116,172,223,0.3) 0%, rgba(116,172,223,0.1) 100%)";
+          e.currentTarget.style.border = "1px solid rgba(116,172,223,0.8)";
+          e.currentTarget.style.boxShadow = "0 0 30px rgba(116,172,223,0.5), inset 0 0 15px rgba(116,172,223,0.2)";
+          e.currentTarget.style.transform = "translateX(-50%) scale(1.05)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "linear-gradient(135deg, rgba(116,172,223,0.15) 0%, rgba(116,172,223,0.05) 100%)";
+          e.currentTarget.style.border = "1px solid rgba(116,172,223,0.5)";
+          e.currentTarget.style.boxShadow = "0 0 20px rgba(116,172,223,0.2), inset 0 0 10px rgba(116,172,223,0.1)";
+          e.currentTarget.style.transform = "translateX(-50%) scale(1)";
+        }}
+      >
+        Ingresar
+      </button>
 
       {/* Scroll indicator */}
       <div
@@ -341,6 +373,14 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
         @keyframes svl-band {
           0%, 100% { opacity: 0.2; transform: scaleX(0.6); }
           50%       { opacity: 0.6; transform: scaleX(1); }
+        }
+        @keyframes svl-btn-fadein {
+          from { opacity: 0; transform: translate(-50%, 15px); }
+          to { opacity: 1; transform: translate(-50%, 0); }
+        }
+        @keyframes svl-btn-pulse {
+          0% { box-shadow: 0 0 20px rgba(116,172,223,0.2), inset 0 0 10px rgba(116,172,223,0.1); }
+          100% { box-shadow: 0 0 30px rgba(116,172,223,0.4), inset 0 0 15px rgba(116,172,223,0.2); }
         }
       `}</style>
     </div>
