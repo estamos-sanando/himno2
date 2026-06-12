@@ -9,7 +9,6 @@ const INVERT = true; // end of video = assembled shield
 export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef     = useRef<HTMLVideoElement>(null);
-  const imgRef       = useRef<HTMLImageElement>(null);
   const promptRef    = useRef<HTMLDivElement>(null);
 
   const targetProg  = useRef(0);
@@ -28,24 +27,16 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
     if (videoRef.current && videoRef.current.style) {
       videoRef.current.style.opacity = "1";
     }
-    if (imgRef.current && imgRef.current.style) {
-      imgRef.current.style.opacity = "0";
-    }
   }, []);
 
-  // ── IMAGE + VIDEO INIT ───────────────────────────────────────────────────
+  // ── VIDEO INIT ───────────────────────────────────────────────────────────
   useEffect(() => {
-    // 1. Show static shield image immediately (always works, no codec issues)
-    const imgTimer = setTimeout(() => {
-      if (imgRef.current && !videoLoaded.current) imgRef.current.style.opacity = "1";
-    }, 80);
-
-    // 2. Show scroll prompt shortly after
+    // 1. Show scroll prompt shortly after
     const promptTimer = setTimeout(() => {
       if (promptRef.current) promptRef.current.style.opacity = "1";
     }, 300);
 
-    // 3. Try to load video in the background
+    // 2. Try to load video in the background
     const video = videoRef.current;
     if (!video) return;
 
@@ -61,7 +52,7 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
 
     const onError = () => {
       videoErrored.current = true;
-      console.warn("SVL: video failed, using static image");
+      console.warn("SVL: video failed");
     };
 
     video.addEventListener("loadeddata",     setupVideo, { once: true });
@@ -72,7 +63,6 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
     else if (video.readyState >= 1) setupVideo();
 
     return () => {
-      clearTimeout(imgTimer);
       clearTimeout(promptTimer);
       video.removeEventListener("loadeddata",     setupVideo);
       video.removeEventListener("loadedmetadata", setupVideo);
@@ -188,15 +178,10 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
           }
         }
 
-        // Fade both image and video out as user scrolls
+        // Fade video out as user scrolls
         const opacity = String(Math.max(0, 1 - p * 1.5));
-        if (videoLoaded.current) {
-          if (v) v.style.opacity = opacity;
-          if (imgRef.current) imgRef.current.style.opacity = "0";
-        } else {
-          if (imgRef.current && imgRef.current.style.opacity !== "0")
-            imgRef.current.style.opacity = opacity;
-          if (v) v.style.opacity = "0";
+        if (videoLoaded.current && v) {
+          v.style.opacity = opacity;
         }
 
         // Fade indicator
@@ -260,21 +245,7 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
         ))}
       </div>
 
-      {/* Static shield image — shown IMMEDIATELY as fallback */}
-      <img
-        ref={imgRef}
-        src="/escudo-argentino.png"
-        alt="Escudo Nacional Argentino"
-        style={{
-          position: "absolute", inset: 0,
-          width: "100%", height: "100%",
-          objectFit: "contain", objectPosition: "center",
-          zIndex: 2, opacity: 0,
-          transition: "opacity 0.6s ease",
-          pointerEvents: "none",
-          filter: "drop-shadow(0 0 40px rgba(116,172,223,0.5)) drop-shadow(0 0 80px rgba(116,172,223,0.2))",
-        }}
-      />
+      {/* No fallback image - use video directly */}
 
       {/* Video — loads in background, fades in over image if it works */}
       <video

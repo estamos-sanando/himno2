@@ -902,8 +902,6 @@
         <!-- Argentine flag bands -->
         <div class="svl-band" style="top:0;animation:svl-band 4s ease-in-out infinite;"></div>
         <div class="svl-band" style="bottom:0;animation:svl-band 4s ease-in-out 0.5s infinite;"></div>
-        <!-- Static shield fallback (always visible, used if video fails) -->
-        <img id="svl-shield-img" src="escudo-argentino.png" alt="Escudo" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center;z-index:2;opacity:0;transition:opacity 0.6s ease;filter:drop-shadow(0 0 40px rgba(116,172,223,0.5)) drop-shadow(0 0 80px rgba(116,172,223,0.2));pointer-events:none;" />
         <!-- Video (loads over the image) -->
         <video id="scroll-video-logo" muted playsinline preload="auto" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center;z-index:3;opacity:0;transition:opacity 0.6s ease;pointer-events:none;will-change:transform;transform:translateZ(0);"></video>
         <!-- Vignette -->
@@ -1191,8 +1189,7 @@
 
     // ── SCROLL-DRIVEN VIDEO LOGO SYSTEM v7 ──
     const svlVideo    = document.getElementById("scroll-video-logo");
-    const svlImg      = document.getElementById("svl-shield-img");
-    const svlPrompt   = document.getElementById("scroll-prompt");
+        const svlPrompt   = document.getElementById("scroll-prompt");
 
     let svlTarget   = 0;
     let svlCurrent  = 0;
@@ -1202,11 +1199,6 @@
     let svlVideoLoaded = false;
     let svlVideoErrored = false;
     const svlKeysPressed = {};
-
-    // Show the static shield image immediately as fallback
-    if (svlImg) {
-      setTimeout(() => { if (!svlVideoLoaded) svlImg.style.opacity = "1"; }, 100);
-    }
     // Show scroll indicator
     if (svlPrompt) {
       setTimeout(() => { svlPrompt.style.opacity = "1"; }, 300);
@@ -1221,8 +1213,7 @@
     function svlRevealVideo() {
       if (!svlVideo || svlVideoErrored) return;
       svlVideoLoaded = true;
-      svlVideo.style.opacity = "1"; // video fades in over the shield image
-      if (svlImg) svlImg.style.opacity = "0"; // hide fallback image to prevent double rendering
+      svlVideo.style.opacity = "1";
     }
 
     function svlSetFrame() {
@@ -1324,15 +1315,10 @@
           }
         }
 
-        // Fade img and video together for parallax effect
+        // Fade video out as user scrolls
         const opacity = String(Math.max(0, 1 - p * 1.5));
-        if (svlVideoLoaded) {
-          if (svlVideo) svlVideo.style.opacity = opacity;
-          if (svlImg)   svlImg.style.opacity   = "0";
-        } else {
-          if (svlImg && svlImg.style.opacity !== "0")
-            svlImg.style.opacity = opacity;
-          if (svlVideo) svlVideo.style.opacity = "0";
+        if (svlVideo && svlVideoLoaded) {
+          svlVideo.style.opacity = opacity;
         }
 
         if (svlPrompt) {
