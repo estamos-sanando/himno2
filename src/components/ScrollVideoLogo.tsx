@@ -1,12 +1,19 @@
 import { useRef, useEffect, useCallback } from "react";
+import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 
 interface ScrollVideoLogoProps {
   onStart: () => void;
+  /** Optional: live MediaPipe hand landmarks to control shield via pinch gesture */
+  handLandmarks?: HandLandmarkerResult | null;
 }
 
 const INVERT = true; // end of video = assembled shield
 
-export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
+// Pinch distance thresholds (normalised MediaPipe space, ~0..1)
+const PINCH_CLOSED = 0.05;  // fingers together  → video at t=0  (shield assembled)
+const PINCH_OPEN   = 0.25;  // fingers spread    → video at end  (shield disassembled)
+
+export default function ScrollVideoLogo({ onStart, handLandmarks }: ScrollVideoLogoProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef     = useRef<HTMLVideoElement>(null);
   const promptRef    = useRef<HTMLDivElement>(null);
@@ -22,6 +29,14 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
   const keysPressed = useRef<{ [key: string]: boolean }>({});
 
   const primedRef = useRef(false);
+
+  // Store the latest landmarks in a ref so the rAF loop can always read the freshest value
+  const landmarksRef = useRef<HandLandmarkerResult | null>(null);
+
+  // Keep landmarksRef in sync with the prop (prop changes every frame from parent)
+  useEffect(() => {
+    landmarksRef.current = handLandmarks ?? null;
+  }, [handLandmarks]);
 
   const revealVideo = useCallback(() => {
     if (videoErrored.current) return;
@@ -151,15 +166,52 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
   // ── rAF LOOP ────────────────────────────────────────────────────────────
   useEffect(() => {
     const tick = () => {
-      // Keyboard input handling (ArrowUp increases progress to disassemble, ArrowDown decreases to assemble)
-      if (keysPressed.current["ArrowUp"]) {
-        targetProg.current = Math.min(1, targetProg.current + 0.008);
-      }
-      if (keysPressed.current["ArrowDown"]) {
-        targetProg.current = Math.max(0, targetProg.current - 0.008);
+      // ── PINCH GESTURE CONTROL ──────────────────────────────────────────
+      // Calculate thumb-index distance from any detected hand.
+      // This overrides scroll/keyboard input when a hand is visible.
+      const lmResult = landmarksRef.current;
+      let pinchOverride = false;
+
+      if (lmResult && lmResult.landmarks && lmResult.landmarks.length > 0) {
+        // Use the first detected hand; prefer the hand with lowest pinch distance (most closed)
+        let bestPinch: number | null = null;
+
+        for (const marks of lmResult.landmarks) {
+          if (marks.length < 21) continue;
+          const thumb = marks[4];  // THUMB_TIP
+          const index = marks[8];  // INDEX_FINGER_TIP
+          // Euclidean distance in normalised [0..1] space
+          const dx = thumb.x - index.x;
+          const dy = thumb.y - index.y;
+          const dz = thumb.z - index.z;
+          const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+          if (bestPinch === null || dist < bestPinch) bestPinch = dist;
+        }
+
+        if (bestPinch !== null) {
+          // Map distance to progress: closed (PINCH_CLOSED) → 0 (assembled), open (PINCH_OPEN) → 1 (disassembled)
+          const normalised = Math.max(0, Math.min(1,
+            (bestPinch - PINCH_CLOSED) / (PINCH_OPEN - PINCH_CLOSED)
+          ));
+          // Direct assignment (no lerp for responsiveness) — the rAF itself acts as a smoother
+          targetProg.current = normalised;
+          pinchOverride = true;
+          // Ensure video is primed so decoder is warm
+          prime();
+        }
       }
 
-      // Dynamic duration check (polls element if durRef.current is not set or invalid yet)
+      // ── KEYBOARD INPUT (only when no hand detected) ────────────────────
+      if (!pinchOverride) {
+        if (keysPressed.current["ArrowUp"]) {
+          targetProg.current = Math.min(1, targetProg.current + 0.008);
+        }
+        if (keysPressed.current["ArrowDown"]) {
+          targetProg.current = Math.max(0, targetProg.current - 0.008);
+        }
+      }
+
+      // ── DYNAMIC DURATION CHECK ─────────────────────────────────────────
       const v = videoRef.current;
       if (v && (!durRef.current || !isFinite(durRef.current) || durRef.current <= 0)) {
         const d = v.duration;
@@ -174,19 +226,23 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
 
       const diff = targetProg.current - currentProg.current;
       if (Math.abs(diff) > 0.0001) {
-        currentProg.current += diff * 0.09;
+        // Lerp smoothing: pinch gets tighter tracking, scroll/keys get gentle easing
+        const lerpFactor = pinchOverride ? 0.18 : 0.09;
+        currentProg.current += diff * lerpFactor;
         currentProg.current  = Math.max(0, Math.min(1, currentProg.current));
         const p = currentProg.current;
 
         // Seek video (throttled to avoid hardware decoder starvation)
         const dur = durRef.current;
         const now = performance.now();
-        if (dur && isFinite(dur) && dur > 0 && v && !v.seeking && now - lastSeekTime.current > 30) {
+        // Pinch gets a tighter seek throttle (16ms ≈ 60fps) for near-instant response
+        const seekThrottle = pinchOverride ? 16 : 30;
+        if (dur && isFinite(dur) && dur > 0 && v && !v.seeking && now - lastSeekTime.current > seekThrottle) {
           const mapped  = INVERT
             ? Math.max(0.01, (1 - p) * dur - 0.04)
             : Math.min(dur - 0.04, p * dur + 0.01);
           const clamped = Math.max(0.01, Math.min(dur - 0.04, mapped));
-          if (Math.abs(clamped - lastSeekT.current) > 0.01) {
+          if (Math.abs(clamped - lastSeekT.current) > 0.005) {
             v.currentTime   = clamped;
             lastSeekT.current = clamped;
             lastSeekTime.current = now;
@@ -210,7 +266,7 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
     };
     rafId.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId.current);
-  }, [revealVideo]);
+  }, [revealVideo, prime]);
 
   // ── RENDER ───────────────────────────────────────────────────────────────
   return (
@@ -257,9 +313,7 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
         ))}
       </div>
 
-      {/* No fallback image - use video directly */}
-
-      {/* Video — loads in background, covers background completely */}
+      {/* Video — mix-blend-mode: screen eliminates TouchDesigner black background */}
       <video
         ref={videoRef}
         src="/logo.mp4"
@@ -268,10 +322,11 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
         preload="auto"
         style={{
           position: "absolute", inset: 0, width: "100%", height: "100%",
-          objectFit: "cover", objectPosition: "center",
+          objectFit: "contain", objectPosition: "center",
           pointerEvents: "none", zIndex: 3, opacity: 0,
           transition: "opacity 0.6s ease",
           willChange: "transform", transform: "translateZ(0)",
+          mixBlendMode: "screen",
         }}
       />
 
@@ -280,6 +335,28 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
         position: "absolute", inset: 0, zIndex: 4, pointerEvents: "none",
         background: "radial-gradient(ellipse 75% 75% at 50% 48%, transparent 25%, rgba(4,8,16,0.75) 100%)",
       }} />
+
+      {/* Hand tracking hint — shown when hand landmarks are detected */}
+      {handLandmarks && handLandmarks.landmarks && handLandmarks.landmarks.length > 0 && (
+        <div style={{
+          position: "absolute",
+          top: "clamp(24px, 4vh, 48px)",
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 8,
+          color: "rgba(116,172,223,0.85)",
+          fontSize: "clamp(10px, 1.5vw, 13px)",
+          fontWeight: 700,
+          letterSpacing: "2.5px",
+          textTransform: "uppercase",
+          textShadow: "0 0 12px rgba(116,172,223,0.6)",
+          pointerEvents: "none",
+          animation: "svl-hint-fadein 0.4s ease",
+          whiteSpace: "nowrap",
+        }}>
+          ✋ Juntá y separás los dedos para armar el escudo
+        </div>
+      )}
 
       {/* Enter button */}
       <button
@@ -355,7 +432,7 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
           letterSpacing: "2.5px", textTransform: "uppercase",
           textAlign: "center", whiteSpace: "nowrap",
         }}>
-          Desplaza para ingresar a la web
+          Desplaza o usá la mano para armar el escudo
         </span>
       </div>
 
@@ -381,6 +458,10 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
         @keyframes svl-btn-pulse {
           0% { box-shadow: 0 0 20px rgba(116,172,223,0.2), inset 0 0 10px rgba(116,172,223,0.1); }
           100% { box-shadow: 0 0 30px rgba(116,172,223,0.4), inset 0 0 15px rgba(116,172,223,0.2); }
+        }
+        @keyframes svl-hint-fadein {
+          from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+          to   { opacity: 1; transform: translateX(-50%) translateY(0); }
         }
       `}</style>
     </div>

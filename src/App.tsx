@@ -27,7 +27,8 @@ const UI_THROTTLE_MS = 80;
 export default function App() {
   const [selectedSong, setSelectedSong] = useState<Song>(SONGS[0]);
   const [isPlaying,    setIsPlaying]    = useState(false);
-  const [trackingEnabled, setTrackingEnabled] = useState(false);
+  const [trackingEnabled,      setTrackingEnabled]      = useState(false);
+  const [introTrackingEnabled, setIntroTrackingEnabled] = useState(true); // track hands on intro
   const [showIntro,    setShowIntro]    = useState(true);
 
   // Mode selection & instrument synth configurations
@@ -44,9 +45,11 @@ export default function App() {
   const [rightDetected, setRightDetected] = useState(false);
   const [leftDetected,  setLeftDetected]  = useState(false);
   const [landmarks,     setLandmarks]     = useState<HandLandmarkerResult | null>(null);
+  const [introLandmarks, setIntroLandmarks] = useState<HandLandmarkerResult | null>(null);
   const [showHelp,      setShowHelp]      = useState(false);
 
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef      = useRef<HTMLVideoElement>(null);
+  const introVideoRef = useRef<HTMLVideoElement>(null);
   const vuBarsRef = useRef<HTMLDivElement>(null);
   
   // Audio Conductor Engine
@@ -93,6 +96,15 @@ export default function App() {
   /**
    * Gesture handler — runs at ~60 fps (or 30fps hand tracking throttle).
    */
+  /**
+   * Intro gesture handler — only used while the intro overlay is visible.
+   * Passes landmarks directly to ScrollVideoLogo for pinch-to-scrub control.
+   */
+  const onIntroGesture = useCallback((g: HandGesture) => {
+    // Throttled intro landmark update (~60fps passthrough is fine since ScrollVideoLogo reads via ref)
+    setIntroLandmarks(g.landmarks);
+  }, []);
+
   const onGesture = useCallback((g: HandGesture) => {
     if (activeModeRef.current === "conductor") {
       // ── Conductor Mode ───────────────────────────────────────
@@ -211,7 +223,12 @@ export default function App() {
     }
   }, [handleRestart]);
 
+  // Hand tracking for the main app (conductor / instrument modes)
   useHandTracking(videoRef, onGesture, trackingEnabled);
+
+  // Separate hidden video + hand tracking for the intro pinch-to-scrub interaction.
+  // Uses its own video element so the intro camerastream is independent of the main one.
+  useHandTracking(introVideoRef, onIntroGesture, introTrackingEnabled && showIntro);
 
   // Real-time audio VU loop
   useEffect(() => {
@@ -258,6 +275,8 @@ export default function App() {
     }
     setIsPlaying(true);
     setTrackingEnabled(true);
+    setIntroTrackingEnabled(false); // stop intro hand tracking
+    setIntroLandmarks(null);
     setShowIntro(false);
   }, [engine, selectedSong, activeMode]);
 
@@ -276,6 +295,7 @@ export default function App() {
     else stopAll();
     setIsPlaying(false);
     setTrackingEnabled(false);
+    setIntroTrackingEnabled(true); // re-enable intro hand tracking
     setShowIntro(true);
   }, [engine, activeMode, stopAll]);
 
@@ -311,10 +331,20 @@ export default function App() {
         }}
       />
 
+      {/* ── Hidden webcam for intro hand tracking ── */}
+      {showIntro && (
+        <video
+          ref={introVideoRef}
+          muted
+          playsInline
+          style={{ position: "fixed", width: 1, height: 1, opacity: 0, pointerEvents: "none", zIndex: -1 }}
+        />
+      )}
+
       {/* ── Intro ── */}
       {showIntro && (
         <div className="intro-overlay" style={{ padding: 0 }}>
-          <ScrollVideoLogo onStart={handleStart} />
+          <ScrollVideoLogo onStart={handleStart} handLandmarks={introLandmarks} />
         </div>
       )}
 
