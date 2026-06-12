@@ -1187,7 +1187,6 @@
 
     // ── DOM ELEMENTS ──
     const introOverlay = document.getElementById("intro-overlay");
-    const btnStartIntro = document.getElementById("btn-start-intro");
     const btnPlayToggle = document.getElementById("btn-play-toggle");
 
     // ── SCROLL-DRIVEN VIDEO LOGO SYSTEM v7 ──
@@ -1200,10 +1199,12 @@
     let svlDur      = 0;
     let svlLastSeek = -1;
     let svlEntered  = false;
+    let svlVideoLoaded = false;
+    const svlKeysPressed = {};
 
     // Show the static shield image immediately as fallback
     if (svlImg) {
-      setTimeout(() => { svlImg.style.opacity = "1"; }, 100);
+      setTimeout(() => { if (!svlVideoLoaded) svlImg.style.opacity = "1"; }, 100);
     }
     // Show scroll indicator
     if (svlPrompt) {
@@ -1218,7 +1219,9 @@
 
     function svlRevealVideo() {
       if (!svlVideo) return;
+      svlVideoLoaded = true;
       svlVideo.style.opacity = "1"; // video fades in over the shield image
+      if (svlImg) svlImg.style.opacity = "0"; // hide fallback image to prevent double rendering
     }
 
     function svlSetFrame() {
@@ -1242,6 +1245,19 @@
       else if (svlVideo.readyState >= 1) svlSetFrame();
     }
 
+    // Keyboard navigation
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        e.preventDefault();
+        svlKeysPressed[e.key] = true;
+      }
+    });
+    window.addEventListener("keyup", (e) => {
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        svlKeysPressed[e.key] = false;
+      }
+    });
+
     // Input handlers
     let svlPrimed = false;
     function svlPrime() {
@@ -1252,9 +1268,8 @@
       }).catch(() => {});
     }
 
-    const introOverlayEl = document.getElementById("intro-overlay");
-    if (introOverlayEl) {
-      introOverlayEl.addEventListener("wheel", (e) => {
+        if (introOverlay) {
+      introOverlay.addEventListener("wheel", (e) => {
         e.preventDefault();
         svlPrime();
         const norm  = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
@@ -1263,10 +1278,10 @@
       }, { passive: false });
 
       let svlLastTY = 0;
-      introOverlayEl.addEventListener("touchstart", (e) => {
+      introOverlay.addEventListener("touchstart", (e) => {
         if (e.touches.length === 1) { svlLastTY = e.touches[0].clientY; svlPrime(); }
       }, { passive: true });
-      introOverlayEl.addEventListener("touchmove", (e) => {
+      introOverlay.addEventListener("touchmove", (e) => {
         if (e.touches.length !== 1) return;
         e.preventDefault();
         const dy = svlLastTY - e.touches[0].clientY;
@@ -1275,12 +1290,21 @@
       }, { passive: false });
 
       // Click/tap anywhere also progresses (for mobile that can't scroll)
-      introOverlayEl.addEventListener("click", () => {
+      introOverlay.addEventListener("click", () => {
         svlTarget = Math.min(1, svlTarget + 0.15);
       });
     }
 
     function svlTick() {
+      // Keyboard input handling
+      if (svlKeysPressed["ArrowUp"]) {
+        svlPrime();
+        svlTarget = Math.min(1, svlTarget + 0.008);
+      }
+      if (svlKeysPressed["ArrowDown"]) {
+        svlTarget = Math.max(0, svlTarget - 0.008);
+      }
+
       const diff = svlTarget - svlCurrent;
       if (Math.abs(diff) > 0.0003) {
         svlCurrent += diff * 0.09;
@@ -1298,8 +1322,15 @@
         }
 
         // Fade img and video together for parallax effect
-        if (svlImg)    svlImg.style.opacity    = String(Math.max(0, 1 - p * 1.5));
-        if (svlVideo)  svlVideo.style.opacity  = svlVideo.src ? String(Math.max(0, 1 - p * 1.5)) : "0";
+        const opacity = String(Math.max(0, 1 - p * 1.5));
+        if (svlVideoLoaded) {
+          if (svlVideo) svlVideo.style.opacity = opacity;
+          if (svlImg)   svlImg.style.opacity   = "0";
+        } else {
+          if (svlImg && svlImg.style.opacity !== "0")
+            svlImg.style.opacity = opacity;
+          if (svlVideo) svlVideo.style.opacity = "0";
+        }
 
         if (svlPrompt) {
           svlPrompt.style.opacity = p < 0.2 ? String(1 - p * 5) : "0";
@@ -2319,9 +2350,7 @@
     btnCloseModal.addEventListener("click", closeHelpModal);
     btnAcceptModal.addEventListener("click", closeHelpModal);
 
-    btnStartIntro.addEventListener("click", startExperience);
-    
-    btnPlayToggle.addEventListener("click", () => {
+        btnPlayToggle.addEventListener("click", () => {
       if (state.isPlaying) {
         stopExperience();
       } else {

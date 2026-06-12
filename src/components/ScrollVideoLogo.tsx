@@ -18,12 +18,14 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
   const rafId       = useRef(0);
   const entered     = useRef(false);
   const durRef      = useRef(0);
+  const videoLoaded = useRef(false);
+  const keysPressed = useRef<{ [key: string]: boolean }>({});
 
   // ── IMAGE + VIDEO INIT ───────────────────────────────────────────────────
   useEffect(() => {
     // 1. Show static shield image immediately (always works, no codec issues)
     const imgTimer = setTimeout(() => {
-      if (imgRef.current) imgRef.current.style.opacity = "1";
+      if (imgRef.current && !videoLoaded.current) imgRef.current.style.opacity = "1";
     }, 80);
 
     // 2. Show scroll prompt shortly after
@@ -42,7 +44,9 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
       const initT = INVERT ? Math.max(0.01, dur - 0.08) : 0.02;
       // Reveal video once the frame is decoded
       const onSeeked = () => {
+        videoLoaded.current = true;
         if (video.style) video.style.opacity = "1";
+        if (imgRef.current) imgRef.current.style.opacity = "0";
       };
       video.addEventListener("seeked", onSeeked, { once: true });
       video.currentTime = initT;
@@ -59,6 +63,27 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
       clearTimeout(promptTimer);
       video.removeEventListener("loadeddata",     setupVideo);
       video.removeEventListener("loadedmetadata", setupVideo);
+    };
+  }, []);
+
+  // ── KEYBOARD LISTENERS ───────────────────────────────────────────────────
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        e.preventDefault();
+        keysPressed.current[e.key] = true;
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        keysPressed.current[e.key] = false;
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup",   handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup",   handleKeyUp);
     };
   }, []);
 
@@ -116,6 +141,18 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
   // ── rAF LOOP ────────────────────────────────────────────────────────────
   useEffect(() => {
     const tick = () => {
+      // Keyboard input handling
+      if (keysPressed.current["ArrowUp"]) {
+        const v = videoRef.current;
+        if (v && durRef.current) {
+          v.play().then(() => setTimeout(() => v.pause(), 40)).catch(() => {});
+        }
+        targetProg.current = Math.min(1, targetProg.current + 0.008);
+      }
+      if (keysPressed.current["ArrowDown"]) {
+        targetProg.current = Math.max(0, targetProg.current - 0.008);
+      }
+
       const diff = targetProg.current - currentProg.current;
       if (Math.abs(diff) > 0.0003) {
         currentProg.current += diff * 0.09;
@@ -138,10 +175,14 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
 
         // Fade both image and video out as user scrolls
         const opacity = String(Math.max(0, 1 - p * 1.5));
-        if (imgRef.current && imgRef.current.style.opacity !== "0")
-          imgRef.current.style.opacity = opacity;
-        if (v && parseFloat(v.style.opacity || "0") > 0)
-          v.style.opacity = opacity;
+        if (videoLoaded.current) {
+          if (v) v.style.opacity = opacity;
+          if (imgRef.current) imgRef.current.style.opacity = "0";
+        } else {
+          if (imgRef.current && imgRef.current.style.opacity !== "0")
+            imgRef.current.style.opacity = opacity;
+          if (v) v.style.opacity = "0";
+        }
 
         // Fade indicator
         if (promptRef.current)
