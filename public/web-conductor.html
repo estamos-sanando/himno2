@@ -949,6 +949,39 @@
         <!-- Enter button -->
         <button id="btn-ingresar" class="svl-btn-ingresar">Ingresar</button>
         <!-- Scroll indicator removed — hand tracking only -->
+
+        <!-- Mini webcam preview (bottom-right corner) -->
+        <canvas id="svl-webcam-canvas" style="
+          position:absolute;
+          bottom:clamp(100px,14vh,140px);
+          right:clamp(16px,2.5vw,32px);
+          width:clamp(120px,16vw,200px);
+          aspect-ratio:4/3;
+          border-radius:12px;
+          border:1px solid rgba(116,172,223,0.4);
+          box-shadow:0 0 20px rgba(116,172,223,0.15),0 4px 24px rgba(0,0,0,0.6);
+          opacity:0.75;
+          z-index:10;
+          background:#0a0f1a;
+          display:block;
+        "></canvas>
+        <div id="svl-webcam-label" style="
+          position:absolute;
+          bottom:clamp(100px,14vh,140px);
+          right:clamp(16px,2.5vw,32px);
+          width:clamp(120px,16vw,200px);
+          z-index:11;
+          padding:4px 8px;
+          color:rgba(255,255,255,0.4);
+          font-size:9px;
+          font-weight:700;
+          letter-spacing:1.5px;
+          text-transform:uppercase;
+          text-align:center;
+          pointer-events:none;
+          background:linear-gradient(transparent,rgba(0,0,0,0.7));
+          border-radius:0 0 12px 12px;
+        ">Cámara</div>
       </div>
     </div>
 
@@ -1400,6 +1433,27 @@
         const svlContainer = document.querySelector(".scroll-video-logo-container");
         if (svlContainer) svlContainer.appendChild(hint);
 
+        // Mini webcam canvas draw loop (mirrors webcam feed)
+        const svlWebcamCanvas = document.getElementById("svl-webcam-canvas");
+        const svlWebcamLabel  = document.getElementById("svl-webcam-label");
+        if (svlWebcamCanvas) {
+          function drawWebcamFrame() {
+            if (!svlIntroLandmarker) return; // stop when tracking stops
+            const ctx2d = svlWebcamCanvas.getContext("2d");
+            if (ctx2d && introVid.readyState >= 2) {
+              svlWebcamCanvas.width  = introVid.videoWidth  || 320;
+              svlWebcamCanvas.height = introVid.videoHeight || 240;
+              ctx2d.save();
+              ctx2d.scale(-1, 1);
+              ctx2d.translate(-svlWebcamCanvas.width, 0);
+              ctx2d.drawImage(introVid, 0, 0, svlWebcamCanvas.width, svlWebcamCanvas.height);
+              ctx2d.restore();
+            }
+            requestAnimationFrame(drawWebcamFrame);
+          }
+          requestAnimationFrame(drawWebcamFrame);
+        }
+
         // Detection loop
         let lastDetect = 0;
         function introDetectLoop() {
@@ -1413,6 +1467,14 @@
             // Show/hide hint based on hand detection
             const hasHand = result && result.landmarks && result.landmarks.length > 0;
             if (hint) hint.style.opacity = hasHand ? "1" : "0";
+            if (svlWebcamLabel) {
+              svlWebcamLabel.style.color = hasHand ? "#74acdf" : "rgba(255,255,255,0.4)";
+              svlWebcamLabel.textContent = hasHand ? "✋ Mano detectada" : "Cámara";
+            }
+            if (svlWebcamCanvas) {
+              svlWebcamCanvas.style.borderColor = hasHand ? "rgba(116,172,223,0.7)" : "rgba(116,172,223,0.4)";
+              svlWebcamCanvas.style.opacity = hasHand ? "0.92" : "0.75";
+            }
           }
           requestAnimationFrame(introDetectLoop);
         }
@@ -1486,8 +1548,8 @@
         const now = performance.now();
         const seekThrottle = svlPinchOverride ? 16 : 30;
         if (svlDur && isFinite(svlDur) && svlDur > 0 && svlVideo && !svlVideo.seeking && now - svlLastSeekTime > seekThrottle) {
-          // NO INVERT: p=0 → t=0 (assembled), p=1 → t=end (disassembled)
-          const target = Math.max(0.01, Math.min(svlDur - 0.04, p * svlDur));
+          // INVERT: p=0 → t=end (assembled), p=1 → t=0 (disassembled)
+          const target = Math.max(0.01, Math.min(svlDur - 0.04, (1 - p) * svlDur - 0.04));
           if (Math.abs(target - svlLastSeek) > 0.005) {
             svlVideo.currentTime = target;
             svlLastSeek = target;
