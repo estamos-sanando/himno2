@@ -1914,8 +1914,9 @@
           const dy = leftFingerPos.y - leftCenterY;
           const distance = Math.hypot(dx, dy);
           if (distance >= innerR && distance <= outerR) {
-            let angle = Math.atan2(dy, dx) + Math.PI / 2;
+            let angle = Math.atan2(dy, dx) + Math.PI / 2 + Math.PI / 12;
             if (angle < 0) angle += 2 * Math.PI;
+            angle = angle % (2 * Math.PI);
             activeLeftIdx = Math.floor((angle / (2 * Math.PI)) * 12) % 12;
           } else if (distance < innerR) {
             activeLeftIdx = "OFF";
@@ -1927,8 +1928,9 @@
           const dy = rightFingerPos.y - rightCenterY;
           const distance = Math.hypot(dx, dy);
           if (distance >= innerR && distance <= outerR) {
-            let angle = Math.atan2(dy, dx) + Math.PI / 2;
+            let angle = Math.atan2(dy, dx) + Math.PI / 2 + Math.PI / 6;
             if (angle < 0) angle += 2 * Math.PI;
+            angle = angle % (2 * Math.PI);
             activeRightIdx = Math.floor((angle / (2 * Math.PI)) * 6) % 6;
           } else if (distance < innerR) {
             activeRightIdx = "OFF";
