@@ -1080,8 +1080,9 @@
             <!-- Waveform selector -->
             <div style="width: 100%;">
               <label style="font-size: 11px; color: var(--text-secondary); display: block; margin-bottom: 6px;">FORMA DE ONDA</label>
-              <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
-                <button class="btn-wave active" data-wave="sine" style="padding: 6px 2px; font-size: 10px; border-radius: 4px; cursor: pointer;">Senoidal</button>
+              <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;">
+                <button class="btn-wave active" data-wave="piano" style="padding: 6px 2px; font-size: 10px; border-radius: 4px; cursor: pointer;">🎹 Piano</button>
+                <button class="btn-wave" data-wave="sine" style="padding: 6px 2px; font-size: 10px; border-radius: 4px; cursor: pointer;">Senoidal</button>
                 <button class="btn-wave" data-wave="triangle" style="padding: 6px 2px; font-size: 10px; border-radius: 4px; cursor: pointer;">Triang.</button>
                 <button class="btn-wave" data-wave="sawtooth" style="padding: 6px 2px; font-size: 10px; border-radius: 4px; cursor: pointer;">Sierra</button>
                 <button class="btn-wave" data-wave="square" style="padding: 6px 2px; font-size: 10px; border-radius: 4px; cursor: pointer;">Cuadrada</button>
@@ -1168,7 +1169,7 @@
       rightHandDetected: false,
       modelLoaded: false,
       activeMode: "conductor", // "conductor" or "instrument"
-      synthWaveform: "sine",
+      synthWaveform: "piano",
       synthOctave: 4,
       snapEnabled: true,
       activeNote: null,
@@ -1385,19 +1386,61 @@
       "dim": [0, 3, 6]
     };
 
+    let standaloneFilter = null;
+    let standaloneReverb = null;
+
+    function buildStandaloneSynth(type) {
+      if (type === "piano") {
+        const synth = new Tone.PolySynth(Tone.FMSynth, {
+          harmonicity: 3.01,
+          modulationIndex: 14,
+          oscillator: { type: "sine" },
+          modulation: { type: "sine" },
+          envelope: {
+            attack: 0.005,
+            decay: 1.4,
+            sustain: 0.2,
+            release: 1.5,
+          },
+          modulationEnvelope: {
+            attack: 0.005,
+            decay: 0.4,
+            sustain: 0.05,
+            release: 0.8,
+          }
+        });
+        synth.volume.value = -12;
+
+        standaloneReverb = new Tone.Reverb({
+          decay: 3.0,
+          wet: 0.45
+        }).toDestination();
+        
+        standaloneFilter = new Tone.Filter(2200, "lowpass");
+        
+        synth.connect(standaloneFilter);
+        standaloneFilter.connect(standaloneReverb);
+        return synth;
+      } else {
+        const synth = new Tone.PolySynth(Tone.Synth, {
+          oscillator: { type: type },
+          envelope: {
+            attack: 0.08,
+            decay: 0.1,
+            sustain: 0.8,
+            release: 0.2
+          }
+        });
+        synth.volume.value = -15;
+        synth.toDestination();
+        return synth;
+      }
+    }
+
     async function initPolySynth() {
       if (polySynth) return;
       await Tone.start();
-      polySynth = new Tone.PolySynth(Tone.Synth, {
-        oscillator: { type: state.synthWaveform },
-        envelope: {
-          attack: 0.08,
-          decay: 0.1,
-          sustain: 0.8,
-          release: 0.2
-        }
-      }).toDestination();
-      polySynth.volume.value = -15;
+      polySynth = buildStandaloneSynth(state.synthWaveform);
       console.log("Standalone PolySynth initialized.");
     }
 
@@ -2425,9 +2468,20 @@
         btn.classList.add("active");
         state.synthWaveform = btn.dataset.wave;
         if (polySynth) {
-          polySynth.set({
-            oscillator: { type: state.synthWaveform }
-          });
+          try {
+            polySynth.releaseAll();
+            polySynth.dispose();
+          } catch(e) {}
+          if (standaloneFilter) {
+            try { standaloneFilter.dispose(); } catch(e) {}
+            standaloneFilter = null;
+          }
+          if (standaloneReverb) {
+            try { standaloneReverb.dispose(); } catch(e) {}
+            standaloneReverb = null;
+          }
+          activeChordNotes = [];
+          polySynth = buildStandaloneSynth(state.synthWaveform);
         }
       });
     });

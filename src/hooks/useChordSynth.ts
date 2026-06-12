@@ -31,38 +31,71 @@ export function getChordNotes(root: string, quality: string | null, octave: numb
 }
 
 export function useChordSynth() {
-  const synthRef = useRef<Tone.PolySynth | null>(null);
+  const synthRef = useRef<Tone.PolySynth<any> | null>(null);
   const activeNotesRef    = useRef<string[]>([]);
   // Fast dedup key: "root:quality:octave" — avoids JSON.stringify at 60fps
   const lastChordKeyRef   = useRef<string>("");
   const currentOscillatorTypeRef = useRef<WaveformType>("piano"); // default → piano
   const currentOctaveRef  = useRef<number>(4);
   const filterRef         = useRef<Tone.Filter | null>(null);
+  const reverbRef         = useRef<Tone.Reverb | null>(null);
 
-  // Build synth & optionally chain a lowpass filter (for the 'piano' preset)
+  // Build synth & optionally chain a lowpass filter + reverb (for the 'piano' preset)
   const buildSynth = useCallback((type: WaveformType) => {
-    const oscType: Tone.ToneOscillatorType = type === "piano" ? "triangle" : type;
-    const synth = new Tone.PolySynth(Tone.Synth, {
-      oscillator: { type: oscType },
-      envelope: {
-        attack:  type === "piano" ? 0.01 : 0.08,
-        decay:   type === "piano" ? 0.30 : 0.10,
-        sustain: type === "piano" ? 0.40 : 0.80,
-        release: type === "piano" ? 1.20 : 0.20,
-      },
-    });
-    synth.volume.value = -15;
-
     if (type === "piano") {
-      // Warm lowpass imitates piano body resonance
-      const filter = new Tone.Filter(2800, "lowpass").toDestination();
-      filterRef.current = filter;
+      // FM Synth for Aura Electric Piano
+      const synth = new Tone.PolySynth(Tone.FMSynth, {
+        harmonicity: 3.01,
+        modulationIndex: 14,
+        oscillator: { type: "sine" },
+        modulation: { type: "sine" },
+        envelope: {
+          attack: 0.005,
+          decay: 1.4,
+          sustain: 0.2,
+          release: 1.5,
+        },
+        modulationEnvelope: {
+          attack: 0.005,
+          decay: 0.4,
+          sustain: 0.05,
+          release: 0.8,
+        }
+      });
+      synth.volume.value = -12; // warm electric piano volume
+
+      // Reverb and Lowpass Filter for electric piano
+      const reverb = new Tone.Reverb({
+        decay: 3.0,
+        wet: 0.45
+      }).toDestination();
+      
+      const filter = new Tone.Filter(2200, "lowpass");
+      
       synth.connect(filter);
+      filter.connect(reverb);
+      
+      reverbRef.current = reverb;
+      filterRef.current = filter;
+      return synth;
     } else {
+      const oscType: Tone.ToneOscillatorType = type;
+      const synth = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: oscType },
+        envelope: {
+          attack:  0.08,
+          decay:   0.10,
+          sustain: 0.80,
+          release: 0.20,
+        },
+      });
+      synth.volume.value = -15;
+      
+      reverbRef.current = null;
       filterRef.current = null;
       synth.toDestination();
+      return synth;
     }
-    return synth;
   }, []);
 
   const initSynth = useCallback(async () => {
@@ -115,7 +148,7 @@ export function useChordSynth() {
     currentOscillatorTypeRef.current = type;
     if (!synthRef.current) return;
 
-    // Rebuild synth with new envelope + filter chain for 'piano' preset
+    // Rebuild synth with new envelope + filter + reverb chain
     try {
       activeNotesRef.current = [];
       lastChordKeyRef.current = "";
@@ -123,6 +156,8 @@ export function useChordSynth() {
       synthRef.current.dispose();
       filterRef.current?.dispose();
       filterRef.current = null;
+      reverbRef.current?.dispose();
+      reverbRef.current = null;
     } catch { /* ignore */ }
     synthRef.current = buildSynth(type);
   }, [buildSynth]);
@@ -139,6 +174,8 @@ export function useChordSynth() {
       }
       filterRef.current?.dispose();
       filterRef.current = null;
+      reverbRef.current?.dispose();
+      reverbRef.current = null;
     };
   }, [initSynth]);
 
