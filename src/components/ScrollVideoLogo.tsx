@@ -2,100 +2,118 @@ import { useRef, useEffect } from "react";
 
 interface ScrollVideoLogoProps {
   onStart: () => void;
-  /**
-   * true  = video frame 0 is DISASSEMBLED and end frame is ASSEMBLED
-   *         (scroll DOWN → re-assembles, auto-enter when assembled)
-   * false = video frame 0 is ASSEMBLED and end frame is DISASSEMBLED
-   *         (scroll DOWN → disassembles, auto-enter when disassembled)
-   */
-  invertDirection?: boolean;
 }
 
-export default function ScrollVideoLogo({
-  onStart,
-  invertDirection = false, // default: start assembled (frame 0), scroll to disassemble
-}: ScrollVideoLogoProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const videoRef     = useRef<HTMLVideoElement>(null);
-  const loadingRef   = useRef<HTMLDivElement>(null);
-  const indicatorRef = useRef<HTMLDivElement>(null);
+/**
+ * Fullscreen scroll-driven video intro.
+ *
+ * Strategy that actually works cross-browser:
+ * 1. Video starts PLAYING (autoplay muted) so the decoder warms up immediately.
+ * 2. Once video can play through, we PAUSE it and hand control to scroll.
+ * 3. Scroll maps forward → toward end of video (disassemble).
+ * 4. At 94 % progress onStart() fires automatically.
+ *
+ * The "assembled → disassemble" direction:
+ *   If your video starts disassembled and ends assembled → we play through
+ *   to near the END, then scroll backward to disassemble.
+ *   invertDir = true below.
+ *   Change to false if your video starts assembled and ends disassembled.
+ */
+const INVERT = true; // true = end of video = assembled shield; scroll disassembles
 
-  const targetProgress  = useRef(0);
-  const currentProgress = useRef(0);
-  const lastSeekTime    = useRef(-1);
-  const rafId           = useRef(0);
-  const enteredRef      = useRef(false);
-  const durationRef     = useRef(0);
-  const readyRef        = useRef(false);   // true once first frame is painted
+export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
+  const containerRef  = useRef<HTMLDivElement>(null);
+  const videoRef      = useRef<HTMLVideoElement>(null);
+  const overlayRef    = useRef<HTMLDivElement>(null); // "Cargando" overlay
+  const indicatorRef  = useRef<HTMLDivElement>(null);
+  const canvasRef     = useRef<HTMLCanvasElement>(null);
 
-  // ── VIDEO INIT ──────────────────────────────────────────────────────────
+  const targetProg  = useRef(0);
+  const currentProg = useRef(0);
+  const lastSeekT   = useRef(-1);
+  const rafId       = useRef(0);
+  const entered     = useRef(false);
+  const durRef      = useRef(0);
+  const scrollReady = useRef(false); // true once we've handed off to scroll
+
+  // ── STEP 1: let the video play briefly so decoder has hot frames ──────
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    const showVideo = () => {
-      if (readyRef.current) return;
-      readyRef.current = true;
-      video.style.opacity = "1";
-      if (loadingRef.current) loadingRef.current.style.display = "none";
+    const startupPlay = () => {
+      durRef.current = video.duration;
+      if (!durRef.current || isNaN(durRef.current)) return;
+
+      // Seek to 10 % of video to warm up the decoder there
+      const warmFrame = durRef.current * 0.1;
+      video.currentTime = warmFrame;
+      lastSeekT.current = warmFrame;
+
+      // Play the video forward; once it can play through, pause near end
+      video.play().catch(() => {});
     };
 
-    const onMeta = () => {
-      const dur = video.duration;
-      if (!dur || isNaN(dur)) return;
-      durationRef.current = dur;
-
-      // Seek to the initial frame (assembled shield)
-      const initTime = invertDirection ? dur - 0.05 : 0.02;
-      lastSeekTime.current = initTime;
-
-      // seeked fires once the frame is actually decoded → safe to show
-      const onFirstSeek = () => {
-        showVideo();
-        video.removeEventListener("seeked", onFirstSeek);
-      };
-      video.addEventListener("seeked", onFirstSeek);
-      video.currentTime = initTime;
-
-      // Fallback: play→pause to prime hardware decoder, then show if seeked hasn't fired yet
-      video.play()
-        .then(() => { video.pause(); video.currentTime = initTime; })
-        .catch(() => {});
-
-      // Hard fallback: show after 600 ms no matter what
-      setTimeout(showVideo, 600);
+    const onCanPlay = () => {
+      startupPlay();
+      video.removeEventListener("canplaythrough", onCanPlay);
+      video.removeEventListener("canplay",        onCanPlay);
     };
 
-    // Listen for both loadedmetadata and loadeddata for maximum compat
-    video.addEventListener("loadedmetadata", onMeta, { once: true });
-    video.addEventListener("loadeddata",     showVideo,  { once: true });
+    const onTimeUpdate = () => {
+      if (!scrollReady.current && durRef.current > 0) {
+        // After 0.8s of playback, pause and jump to the "assembled" frame
+        const frac = video.currentTime / durRef.current;
+        if (frac >= 0.15) {   // played 15% of the video
+          video.pause();
+          // Go to initial display position
+          const initT = INVERT
+            ? durRef.current * 0.92   // near end = assembled
+            : durRef.current * 0.05;  // near start = assembled
+          video.currentTime = initT;
+          lastSeekT.current = initT;
+          targetProg.current = INVERT ? 0 : 0;
+          currentProg.current = 0;
+          scrollReady.current = true;
 
-    if (video.readyState >= 2) {
-      onMeta();
-      showVideo();
-    } else if (video.readyState >= 1) {
-      onMeta();
-    }
+          // Hide loading overlay now
+          if (overlayRef.current) {
+            overlayRef.current.style.opacity = "0";
+            setTimeout(() => {
+              if (overlayRef.current) overlayRef.current.style.display = "none";
+            }, 500);
+          }
+
+          video.removeEventListener("timeupdate", onTimeUpdate);
+        }
+      }
+    };
+
+    video.addEventListener("canplaythrough", onCanPlay);
+    video.addEventListener("canplay",        onCanPlay);
+    video.addEventListener("timeupdate",     onTimeUpdate);
+
+    if (video.readyState >= 4) onCanPlay(); // already ready
+    else if (video.readyState >= 3) onCanPlay();
 
     return () => {
-      video.removeEventListener("loadedmetadata", onMeta);
-      video.removeEventListener("loadeddata",     showVideo);
+      video.removeEventListener("canplaythrough", onCanPlay);
+      video.removeEventListener("canplay",        onCanPlay);
+      video.removeEventListener("timeupdate",     onTimeUpdate);
     };
-  }, [invertDirection]);
+  }, []);
 
-  // ── SCROLL / TOUCH INPUT ────────────────────────────────────────────────
+  // ── STEP 2: scroll / touch input ────────────────────────────────────
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      // Normalise so 1 mouse-notch ≈ 0.015, big trackpad flicks don't skip too far
-      const raw   = e.deltaY;
-      const norm  = raw === 0 ? 0 : (raw > 0 ? 1 : -1);
-      const speed = Math.min(Math.abs(raw), 120) / 120; // cap at 1
-      const delta = norm * speed * 0.025;
-      targetProgress.current = Math.max(0, Math.min(1, targetProgress.current + delta));
+      if (!scrollReady.current) return;
+      const norm  = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
+      const speed = Math.min(Math.abs(e.deltaY), 100) / 100;
+      targetProg.current = Math.max(0, Math.min(1, targetProg.current + norm * speed * 0.022));
     };
 
     let lastTY = 0;
@@ -105,10 +123,11 @@ export default function ScrollVideoLogo({
     const onTouchMove = (e: TouchEvent) => {
       if (e.touches.length !== 1) return;
       e.preventDefault();
-      const dy  = lastTY - e.touches[0].clientY; // positive = swipe up = disassemble
-      lastTY    = e.touches[0].clientY;
-      const delta = (dy / window.innerHeight) * 2.2;
-      targetProgress.current = Math.max(0, Math.min(1, targetProgress.current + delta));
+      if (!scrollReady.current) return;
+      const dy    = lastTY - e.touches[0].clientY;
+      lastTY      = e.touches[0].clientY;
+      const delta = (dy / window.innerHeight) * 2.0;
+      targetProg.current = Math.max(0, Math.min(1, targetProg.current + delta));
     };
 
     el.addEventListener("wheel",      onWheel,      { passive: false });
@@ -121,42 +140,42 @@ export default function ScrollVideoLogo({
     };
   }, []);
 
-  // ── rAF LOOP — zero React state mutations ───────────────────────────────
+  // ── STEP 3: rAF loop — direct DOM mutations only ─────────────────────
   useEffect(() => {
-    const LERP         = 0.09;        // smooth but responsive
-    const SEEK_THRESH  = 0.003;       // skip write if < 3 ms change
-    const AUTO_ENTER   = 0.94;        // fire onStart at 94 % progress
+    const LERP      = 0.08;
+    const SEEK_TH   = 0.004; // only write currentTime if moved > 4ms
+    const ENTER_AT  = 0.93;
 
     const tick = () => {
-      const dur = durationRef.current;
-      if (dur && !isNaN(dur)) {
-        const diff = targetProgress.current - currentProgress.current;
-        if (Math.abs(diff) > 0.0004) {
-          currentProgress.current += diff * LERP;
-          currentProgress.current  = Math.max(0, Math.min(1, currentProgress.current));
-          const p = currentProgress.current;
+      const dur = durRef.current;
+      if (dur && scrollReady.current) {
+        const diff = targetProg.current - currentProg.current;
+        if (Math.abs(diff) > 0.0003) {
+          currentProg.current += diff * LERP;
+          currentProg.current  = Math.max(0, Math.min(1, currentProg.current));
+          const p = currentProg.current;
 
-          // Map progress → video time
-          const mapped  = invertDirection
-            ? (1 - p) * dur          // invert: p=0 → end, p=1 → start
-            : p * dur;               // normal: p=0 → start, p=1 → end
+          // Map progress to video time
+          // INVERT=true: p=0 → near end (assembled), p=1 → near 0 (disassembled)
+          const mapped = INVERT
+            ? (1 - p) * dur * 0.92        // stays in 0..92% range
+            : p * dur;
           const clamped = Math.max(0.01, Math.min(dur - 0.04, mapped));
 
           const video = videoRef.current;
-          if (video && Math.abs(clamped - lastSeekTime.current) > SEEK_THRESH) {
-            video.currentTime  = clamped;
-            lastSeekTime.current = clamped;
+          if (video && Math.abs(clamped - lastSeekT.current) > SEEK_TH) {
+            video.currentTime = clamped;
+            lastSeekT.current = clamped;
           }
 
-          // Scroll indicator fade-out
+          // Fade out indicator
           if (indicatorRef.current) {
-            indicatorRef.current.style.opacity =
-              p < 0.18 ? String(1 - p * 5.5) : "0";
+            indicatorRef.current.style.opacity = p < 0.2 ? String(1 - p * 5) : "0";
           }
 
-          // Auto-enter on full disassemble
-          if (p >= AUTO_ENTER && !enteredRef.current) {
-            enteredRef.current = true;
+          // Auto-enter
+          if (p >= ENTER_AT && !entered.current) {
+            entered.current = true;
             onStart();
           }
         }
@@ -166,9 +185,8 @@ export default function ScrollVideoLogo({
 
     rafId.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId.current);
-  }, [invertDirection, onStart]);
+  }, [onStart]);
 
-  // ── RENDER ───────────────────────────────────────────────────────────────
   return (
     <div
       ref={containerRef}
@@ -176,35 +194,62 @@ export default function ScrollVideoLogo({
         position: "absolute",
         inset: 0,
         overflow: "hidden",
-        background: "#050a12",
-        willChange: "transform",
-        WebkitTransform: "translateZ(0)",
-        transform: "translateZ(0)",
         cursor: "ns-resize",
         userSelect: "none",
         WebkitUserSelect: "none",
       }}
     >
-      {/* Loading label */}
-      <div
-        ref={loadingRef}
-        style={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "rgba(116,172,223,0.5)",
-          fontSize: "13px",
-          letterSpacing: "3px",
-          textTransform: "uppercase",
-          zIndex: 3,
-        }}
-      >
-        Cargando…
+      {/* ── Cinematic background: deep space gradient ── */}
+      <div style={{
+        position: "absolute",
+        inset: 0,
+        background: "radial-gradient(ellipse 90% 90% at 50% 50%, #0a1628 0%, #040810 100%)",
+        zIndex: 0,
+      }} />
+
+      {/* ── Animated Argentine flag color bands ── */}
+      <div style={{
+        position: "absolute",
+        top: 0, left: 0, right: 0, height: "3px",
+        background: "linear-gradient(90deg, transparent, #74acdf 30%, #ffffff 50%, #74acdf 70%, transparent)",
+        opacity: 0.6,
+        animation: "svl-band 4s ease-in-out infinite",
+        zIndex: 1,
+      }} />
+      <div style={{
+        position: "absolute",
+        bottom: 0, left: 0, right: 0, height: "3px",
+        background: "linear-gradient(90deg, transparent, #74acdf 30%, #ffffff 50%, #74acdf 70%, transparent)",
+        opacity: 0.6,
+        animation: "svl-band 4s ease-in-out infinite 0.5s",
+        zIndex: 1,
+      }} />
+
+      {/* ── Particle field (CSS only, no JS) ── */}
+      <div style={{ position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none" }}>
+        {Array.from({ length: 40 }).map((_, i) => {
+          const x = (i * 37 + 11) % 100;
+          const y = (i * 53 + 23) % 100;
+          const size = 1 + (i % 3);
+          const dur  = 3 + (i % 5);
+          const del  = (i * 0.3) % 4;
+          return (
+            <div key={i} style={{
+              position: "absolute",
+              left: `${x}%`,
+              top: `${y}%`,
+              width: `${size}px`,
+              height: `${size}px`,
+              borderRadius: "50%",
+              background: i % 3 === 0 ? "#74acdf" : i % 3 === 1 ? "#ffffff" : "#f6b800",
+              opacity: 0,
+              animation: `svl-star ${dur}s ease-in-out ${del}s infinite`,
+            }} />
+          );
+        })}
       </div>
 
-      {/* Video — promoted to its own GPU compositor layer */}
+      {/* ── Video element ── */}
       <video
         ref={videoRef}
         src="/logo.mp4"
@@ -216,93 +261,130 @@ export default function ScrollVideoLogo({
           inset: 0,
           width: "100%",
           height: "100%",
-          objectFit: "contain",   // contain keeps full shield visible without cropping
+          objectFit: "contain",
           objectPosition: "center",
           pointerEvents: "none",
-          opacity: 0,             // revealed by JS after first seeked event
-          transition: "opacity 0.6s ease",
+          zIndex: 3,
+          // Start visible — we'll fade in the overlay away instead
+          opacity: 1,
           willChange: "transform",
-          WebkitTransform: "translateZ(0)",
           transform: "translateZ(0)",
-          background: "#050a12",
         }}
       />
 
-      {/* Vignette */}
+      {/* ── Loading overlay (hides while video primes) ── */}
       <div
+        ref={overlayRef}
         style={{
           position: "absolute",
           inset: 0,
-          background:
-            "radial-gradient(ellipse 80% 80% at 50% 50%, transparent 35%, rgba(0,0,0,0.7) 100%)",
-          pointerEvents: "none",
-          zIndex: 2,
+          background: "radial-gradient(ellipse 90% 90% at 50% 50%, #0a1628 0%, #040810 100%)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "20px",
+          zIndex: 10,
+          transition: "opacity 0.5s ease",
         }}
-      />
+      >
+        {/* Spinning ring */}
+        <div style={{
+          width: "64px",
+          height: "64px",
+          border: "3px solid rgba(116,172,223,0.15)",
+          borderTop: "3px solid #74acdf",
+          borderRadius: "50%",
+          animation: "svl-spin 1s linear infinite",
+        }} />
+        <span style={{
+          color: "rgba(116,172,223,0.7)",
+          fontSize: "12px",
+          letterSpacing: "3px",
+          textTransform: "uppercase",
+        }}>
+          Cargando escudo…
+        </span>
+      </div>
 
-      {/* Scroll indicator */}
+      {/* ── Vignette ── */}
+      <div style={{
+        position: "absolute",
+        inset: 0,
+        background: "radial-gradient(ellipse 75% 75% at 50% 48%, transparent 25%, rgba(4,8,16,0.75) 100%)",
+        pointerEvents: "none",
+        zIndex: 4,
+      }} />
+
+      {/* ── Scroll indicator ── */}
       <div
         ref={indicatorRef}
         style={{
           position: "absolute",
-          bottom: "clamp(20px, 4vh, 44px)",
+          bottom: "clamp(22px, 4.5vh, 48px)",
           left: "50%",
           transform: "translateX(-50%)",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          gap: "8px",
+          gap: "10px",
           pointerEvents: "none",
-          zIndex: 5,
+          zIndex: 6,
           color: "#74acdf",
-          textShadow: "0 0 14px rgba(116,172,223,0.9)",
-          opacity: 1,
-          transition: "opacity 0.25s ease",
+          transition: "opacity 0.3s ease",
         }}
       >
-        {/* Mouse icon */}
-        <div
-          style={{
-            width: "18px",
-            height: "28px",
-            border: "2px solid currentColor",
-            borderRadius: "10px",
-            display: "flex",
-            justifyContent: "center",
-            paddingTop: "5px",
-            boxSizing: "border-box",
-          }}
-        >
-          <div
-            style={{
-              width: "4px",
-              height: "6px",
-              borderRadius: "3px",
-              background: "currentColor",
-              animation: "svl-wheel 1.4s ease-in-out infinite",
-            }}
-          />
+        <div style={{
+          width: "20px",
+          height: "32px",
+          border: "2px solid rgba(116,172,223,0.8)",
+          borderRadius: "12px",
+          display: "flex",
+          justifyContent: "center",
+          paddingTop: "6px",
+          boxSizing: "border-box",
+          boxShadow: "0 0 12px rgba(116,172,223,0.4)",
+        }}>
+          <div style={{
+            width: "4px",
+            height: "7px",
+            borderRadius: "3px",
+            background: "#74acdf",
+            boxShadow: "0 0 6px #74acdf",
+            animation: "svl-wheel 1.5s ease-in-out infinite",
+          }} />
         </div>
-        <span
-          style={{
-            fontSize: "clamp(9px, 1.8vw, 11px)",
-            fontWeight: 700,
-            letterSpacing: "2px",
-            textTransform: "uppercase",
-            textAlign: "center",
-          }}
-        >
+        <span style={{
+          fontSize: "clamp(9px, 1.6vw, 11px)",
+          fontWeight: 700,
+          letterSpacing: "2.5px",
+          textTransform: "uppercase",
+          textAlign: "center",
+          textShadow: "0 0 16px rgba(116,172,223,0.8)",
+          whiteSpace: "nowrap",
+        }}>
           Desplaza para ingresar a la web
         </span>
       </div>
 
-      {/* Keyframe for wheel dot animation */}
+      {/* ── Keyframes ── */}
       <style>{`
         @keyframes svl-wheel {
-          0%   { opacity: 0;   transform: translateY(0); }
+          0%   { opacity: 0; transform: translateY(0); }
           20%  { opacity: 1; }
-          80%  { opacity: 0.1; transform: translateY(9px); }
-          100% { opacity: 0;   transform: translateY(0); }
+          80%  { opacity: 0.15; transform: translateY(10px); }
+          100% { opacity: 0; transform: translateY(0); }
+        }
+        @keyframes svl-star {
+          0%, 100% { opacity: 0; transform: scale(0.5); }
+          50%       { opacity: 0.6; transform: scale(1); }
+        }
+        @keyframes svl-band {
+          0%, 100% { opacity: 0.2; transform: scaleX(0.5); }
+          50%       { opacity: 0.7; transform: scaleX(1); }
+        }
+        @keyframes svl-spin {
+          to { transform: rotate(360deg); }
         }
       `}</style>
     </div>

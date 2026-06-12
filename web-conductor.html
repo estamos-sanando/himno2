@@ -557,8 +557,8 @@
       position: fixed;
       inset: 0;
       z-index: 100;
-      background: #000;
       overflow: hidden;
+      background: radial-gradient(ellipse 90% 90% at 50% 50%, #0a1628 0%, #040810 100%);
     }
 
     .intro-overlay {
@@ -576,9 +576,7 @@
       position: absolute;
       inset: 0;
       overflow: hidden;
-      background: #000;
-      will-change: transform;
-      transform: translateZ(0);
+      cursor: ns-resize;
     }
 
     .scroll-video-logo-container video {
@@ -589,16 +587,13 @@
       object-fit: contain;
       object-position: center;
       pointer-events: none;
-      opacity: 0;
-      transition: opacity 0.6s ease;
+      opacity: 1;
       will-change: transform;
       transform: translateZ(0);
-      background: #050a12;
+      z-index: 3;
     }
 
-    .scroll-video-logo-container.loaded video {
-      opacity: 1;
-    }
+    
 
     .scroll-prompt-indicator {
       position: absolute;
@@ -635,6 +630,52 @@
       animation: mouse-wheel-scroll 1.5s infinite;
     }
 
+
+    /* ── Visual Motion Styles ── */
+    .svl-bg {
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse 90% 90% at 50% 50%, #0a1628 0%, #040810 100%);
+      z-index: 0;
+    }
+    .svl-band {
+      position: absolute; left: 0; right: 0; height: 3px;
+      background: linear-gradient(90deg, transparent, #74acdf 30%, #ffffff 50%, #74acdf 70%, transparent);
+      opacity: 0.5; z-index: 1;
+    }
+    .svl-vignette {
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse 75% 75% at 50% 48%, transparent 25%, rgba(4,8,16,0.78) 100%);
+      pointer-events: none; z-index: 4;
+    }
+    .svl-loading-overlay {
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse 90% 90% at 50% 50%, #0a1628 0%, #040810 100%);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 20px;
+      z-index: 10; transition: opacity 0.5s ease;
+    }
+    .svl-spinner {
+      width: 64px; height: 64px;
+      border: 3px solid rgba(116,172,223,0.15);
+      border-top: 3px solid #74acdf;
+      border-radius: 50%;
+      animation: svl-spin 1s linear infinite;
+    }
+    @keyframes svl-spin { to { transform: rotate(360deg); } }
+    @keyframes svl-band {
+      0%, 100% { opacity: 0.2; transform: scaleX(0.5); }
+      50%       { opacity: 0.7; transform: scaleX(1); }
+    }
+    @keyframes svl-star {
+      0%, 100% { opacity: 0; transform: scale(0.5); }
+      50%       { opacity: 0.5; transform: scale(1); }
+    }
+    @keyframes svl-wheel {
+      0%   { opacity: 0; transform: translateY(0); }
+      20%  { opacity: 1; }
+      80%  { opacity: 0.15; transform: translateY(10px); }
+      100% { opacity: 0; transform: translateY(0); }
+    }
     @keyframes mouse-wheel-scroll {
       0% { opacity: 0; transform: translateY(0); }
       20% { opacity: 1; }
@@ -853,21 +894,32 @@
     <!-- Patriotic flag banner -->
     <div class="patriotic-banner"></div>
 
-    <!-- Intro Overlay (Fullscreen Visual Motion) -->
-    <div id="intro-overlay" class="intro-overlay" style="padding: 0;">
+    <!-- Intro Overlay (Fullscreen Visual Motion v5) -->
+    <div id="intro-overlay" class="intro-overlay">
       <div id="scroll-video-container" class="scroll-video-logo-container">
+        <!-- Cinematic bg -->
+        <div class="svl-bg"></div>
+        <!-- Argentine flag bands -->
+        <div class="svl-band" style="top:0; animation: svl-band 4s ease-in-out infinite;"></div>
+        <div class="svl-band" style="bottom:0; animation: svl-band 4s ease-in-out 0.5s infinite;"></div>
+        <!-- Video -->
         <video id="scroll-video-logo" src="logo.mp4" muted playsinline preload="auto"></video>
-        
-        <div style="position: absolute; inset: 0; background: radial-gradient(circle, rgba(0,0,0,0) 40%, rgba(0,0,0,0.6) 100%); pointer-events: none; z-index: 1;"></div>
-        
-        <div id="scroll-prompt" class="scroll-prompt-indicator">
-          <div class="mouse-icon">
-            <div class="mouse-dot"></div>
+        <!-- Vignette -->
+        <div class="svl-vignette"></div>
+        <!-- Scroll indicator -->
+        <div id="scroll-prompt" style="position:absolute;bottom:clamp(22px,4.5vh,48px);left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:10px;pointer-events:none;z-index:6;color:#74acdf;transition:opacity 0.3s ease;">
+          <div style="width:20px;height:32px;border:2px solid rgba(116,172,223,0.8);border-radius:12px;display:flex;justify-content:center;padding-top:6px;box-sizing:border-box;box-shadow:0 0 12px rgba(116,172,223,0.4);">
+            <div style="width:4px;height:7px;border-radius:3px;background:#74acdf;box-shadow:0 0 6px #74acdf;animation:svl-wheel 1.5s ease-in-out infinite;"></div>
           </div>
-          <span style="font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;">Desplaza para ingresar a la web</span>
+          <span style="font-size:clamp(9px,1.6vw,11px);font-weight:700;letter-spacing:2.5px;text-transform:uppercase;text-align:center;text-shadow:0 0 16px rgba(116,172,223,0.8);white-space:nowrap;">Desplaza para ingresar a la web</span>
         </div>
-
-        <!-- btn-start-intro removed — auto-enter on disassemble -->
+        <!-- Loading overlay -->
+        <div id="svl-loading" class="svl-loading-overlay">
+          <div class="svl-spinner"></div>
+          <span style="color:rgba(116,172,223,0.7);font-size:12px;letter-spacing:3px;text-transform:uppercase;">Cargando escudo&hellip;</span>
+        </div>
+      </div>
+    </div>
       </div>
     </div>
 
@@ -1143,60 +1195,62 @@
     const btnStartIntro = document.getElementById("btn-start-intro");
     const btnPlayToggle = document.getElementById("btn-play-toggle");
 
-    // ── SCROLL-DRIVEN VIDEO LOGO SYSTEM v4 ──
+    // ── SCROLL-DRIVEN VIDEO LOGO SYSTEM v5 (play-to-warm) ──
     const scrollVideoContainer = document.getElementById("scroll-video-container");
     const scrollVideoLogo      = document.getElementById("scroll-video-logo");
     const scrollPrompt         = document.getElementById("scroll-prompt");
+    const svlLoadingEl         = document.getElementById("svl-loading");
 
-    let svlTarget   = 0;
-    let svlCurrent  = 0;
-    let svlDur      = 0;
-    let svlLastSeek = -1;
-    let svlEntered  = false;
-    const SVL_INVERT    = false;   // false = frame-0 is assembled, scroll disassembles
-    const SVL_LERP      = 0.09;
-    const SVL_SEEK_TH   = 0.003;
-    const SVL_AUTO_ENTER= 0.94;
+    let svlTarget    = 0;
+    let svlCurrent   = 0;
+    let svlDur       = 0;
+    let svlLastSeek  = -1;
+    let svlEntered   = false;
+    let svlReady     = false; // true after play-to-warm finishes
+    const SVL_INVERT = true;  // true = end = assembled, scroll toward start = disassemble
 
-    function svlShowVideo() {
-      if (scrollVideoLogo.style.opacity === "1") return;
-      scrollVideoLogo.style.opacity = "1";
-      if (scrollVideoContainer) scrollVideoContainer.classList.add("loaded");
-      const ld = scrollVideoContainer && scrollVideoContainer.querySelector(".vml-loading");
-      if (ld) ld.style.display = "none";
+    function svlHideLoader() {
+      if (!svlLoadingEl) return;
+      svlLoadingEl.style.opacity = "0";
+      setTimeout(() => { if (svlLoadingEl) svlLoadingEl.style.display = "none"; }, 500);
     }
 
-    function svlInit() {
+    function svlOnTimeUpdate() {
+      if (!svlReady && svlDur > 0) {
+        const frac = scrollVideoLogo.currentTime / svlDur;
+        if (frac >= 0.15) {
+          scrollVideoLogo.pause();
+          const initT = SVL_INVERT ? svlDur * 0.92 : svlDur * 0.05;
+          scrollVideoLogo.currentTime = initT;
+          svlLastSeek = initT;
+          svlTarget   = 0;
+          svlCurrent  = 0;
+          svlReady    = true;
+          svlHideLoader();
+          scrollVideoLogo.removeEventListener("timeupdate", svlOnTimeUpdate);
+        }
+      }
+    }
+
+    function svlStartWarm() {
       svlDur = scrollVideoLogo.duration;
       if (!svlDur || isNaN(svlDur)) return;
-      const initTime = SVL_INVERT ? svlDur - 0.05 : 0.02;
-      svlLastSeek = initTime;
-      // Show video once first frame seeked
-      scrollVideoLogo.addEventListener("seeked", svlShowVideo, { once: true });
-      scrollVideoLogo.currentTime = initTime;
-      // Prime hardware decoder
-      scrollVideoLogo.play().then(() => {
-        scrollVideoLogo.pause();
-        scrollVideoLogo.currentTime = initTime;
-      }).catch(() => {});
-      // Hard fallback
-      setTimeout(svlShowVideo, 600);
+      scrollVideoLogo.addEventListener("timeupdate", svlOnTimeUpdate);
+      scrollVideoLogo.play().catch(() => {});
     }
 
-    scrollVideoLogo.addEventListener("loadedmetadata", svlInit, { once: true });
-    scrollVideoLogo.addEventListener("loadeddata", svlShowVideo, { once: true });
-    if (scrollVideoLogo.readyState >= 2) { svlInit(); svlShowVideo(); }
-    else if (scrollVideoLogo.readyState >= 1) svlInit();
+    scrollVideoLogo.addEventListener("canplay",        svlStartWarm, { once: true });
+    scrollVideoLogo.addEventListener("canplaythrough", svlStartWarm, { once: true });
+    if (scrollVideoLogo.readyState >= 3) svlStartWarm();
 
     // Wheel
     if (introOverlay) {
       introOverlay.addEventListener("wheel", (e) => {
         e.preventDefault();
-        const raw  = e.deltaY;
-        const norm = raw === 0 ? 0 : (raw > 0 ? 1 : -1);
-        const speed= Math.min(Math.abs(raw), 120) / 120;
-        const delta= norm * speed * 0.025;
-        svlTarget = Math.max(0, Math.min(1, svlTarget + delta));
+        if (!svlReady) return;
+        const norm  = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
+        const speed = Math.min(Math.abs(e.deltaY), 100) / 100;
+        svlTarget = Math.max(0, Math.min(1, svlTarget + norm * speed * 0.022));
       }, { passive: false });
 
       let svlLastTY = 0;
@@ -1206,36 +1260,39 @@
       introOverlay.addEventListener("touchmove", (e) => {
         if (e.touches.length !== 1) return;
         e.preventDefault();
+        if (!svlReady) return;
         const dy    = svlLastTY - e.touches[0].clientY;
         svlLastTY   = e.touches[0].clientY;
-        const delta = (dy / window.innerHeight) * 2.2;
+        const delta = (dy / window.innerHeight) * 2.0;
         svlTarget   = Math.max(0, Math.min(1, svlTarget + delta));
       }, { passive: false });
     }
 
     function svlTick() {
-      if (svlDur && !isNaN(svlDur)) {
+      if (svlDur && svlReady) {
         const diff = svlTarget - svlCurrent;
-        if (Math.abs(diff) > 0.0004) {
-          svlCurrent += diff * SVL_LERP;
+        if (Math.abs(diff) > 0.0003) {
+          svlCurrent += diff * 0.08;
           svlCurrent  = Math.max(0, Math.min(1, svlCurrent));
           const p = svlCurrent;
-          const mapped  = SVL_INVERT ? (1 - p) * svlDur : p * svlDur;
+          const mapped  = SVL_INVERT ? (1 - p) * svlDur * 0.92 : p * svlDur;
           const clamped = Math.max(0.01, Math.min(svlDur - 0.04, mapped));
-          if (Math.abs(clamped - svlLastSeek) > SVL_SEEK_TH) {
+          if (Math.abs(clamped - svlLastSeek) > 0.004) {
             scrollVideoLogo.currentTime = clamped;
             svlLastSeek = clamped;
           }
           if (scrollPrompt) {
-            scrollPrompt.style.opacity = p < 0.18 ? String(1 - p * 5.5) : "0";
+            scrollPrompt.style.opacity = p < 0.2 ? String(1 - p * 5) : "0";
           }
-          if (p >= SVL_AUTO_ENTER && !svlEntered) {
+          if (p >= 0.93 && !svlEntered) {
             svlEntered = true;
             startExperience();
           }
         }
       }
       requestAnimationFrame(svlTick);
+    }
+    requestAnimationFrame(svlTick);
     }
     requestAnimationFrame(svlTick);
     }
