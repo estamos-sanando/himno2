@@ -1195,59 +1195,60 @@
     const btnStartIntro = document.getElementById("btn-start-intro");
     const btnPlayToggle = document.getElementById("btn-play-toggle");
 
-    // ── SCROLL-DRIVEN VIDEO LOGO SYSTEM v5 (play-to-warm) ──
+    // ── SCROLL-DRIVEN VIDEO LOGO SYSTEM v6 (no autoplay) ──
     const scrollVideoContainer = document.getElementById("scroll-video-container");
     const scrollVideoLogo      = document.getElementById("scroll-video-logo");
     const scrollPrompt         = document.getElementById("scroll-prompt");
     const svlLoadingEl         = document.getElementById("svl-loading");
 
-    let svlTarget    = 0;
-    let svlCurrent   = 0;
-    let svlDur       = 0;
-    let svlLastSeek  = -1;
-    let svlEntered   = false;
-    let svlReady     = false; // true after play-to-warm finishes
-    const SVL_INVERT = true;  // true = end = assembled, scroll toward start = disassemble
+    let svlTarget   = 0;
+    let svlCurrent  = 0;
+    let svlDur      = 0;
+    let svlLastSeek = -1;
+    let svlEntered  = false;
+    const SVL_INVERT = true;  // end of video = assembled shield
 
+    let svlLoaderHidden = false;
     function svlHideLoader() {
+      if (svlLoaderHidden) return;
+      svlLoaderHidden = true;
       if (!svlLoadingEl) return;
       svlLoadingEl.style.opacity = "0";
       setTimeout(() => { if (svlLoadingEl) svlLoadingEl.style.display = "none"; }, 500);
     }
 
-    function svlOnTimeUpdate() {
-      if (!svlReady && svlDur > 0) {
-        const frac = scrollVideoLogo.currentTime / svlDur;
-        if (frac >= 0.15) {
-          scrollVideoLogo.pause();
-          const initT = SVL_INVERT ? svlDur * 0.92 : svlDur * 0.05;
-          scrollVideoLogo.currentTime = initT;
-          svlLastSeek = initT;
-          svlTarget   = 0;
-          svlCurrent  = 0;
-          svlReady    = true;
-          svlHideLoader();
-          scrollVideoLogo.removeEventListener("timeupdate", svlOnTimeUpdate);
-        }
-      }
-    }
+    // Hard fallback — always hide loader after 2 s
+    const svlFallback = setTimeout(svlHideLoader, 2000);
 
-    function svlStartWarm() {
+    function svlSetup() {
       svlDur = scrollVideoLogo.duration;
       if (!svlDur || isNaN(svlDur)) return;
-      scrollVideoLogo.addEventListener("timeupdate", svlOnTimeUpdate);
-      scrollVideoLogo.play().catch(() => {});
+      const initT = SVL_INVERT ? Math.max(0.01, svlDur - 0.08) : 0.02;
+      // Hide loader once the frame is decoded
+      scrollVideoLogo.addEventListener("seeked", svlHideLoader, { once: true });
+      scrollVideoLogo.currentTime = initT;
+      svlLastSeek = initT;
     }
 
-    scrollVideoLogo.addEventListener("canplay",        svlStartWarm, { once: true });
-    scrollVideoLogo.addEventListener("canplaythrough", svlStartWarm, { once: true });
-    if (scrollVideoLogo.readyState >= 3) svlStartWarm();
+    scrollVideoLogo.addEventListener("loadeddata",     svlSetup, { once: true });
+    scrollVideoLogo.addEventListener("loadedmetadata", svlSetup, { once: true });
+    if (scrollVideoLogo.readyState >= 2) svlSetup();
+    else if (scrollVideoLogo.readyState >= 1) svlSetup();
 
-    // Wheel
+    // Wheel + touch
+    let svlPrimed = false;
+    function svlPrime() {
+      if (svlPrimed) return;
+      svlPrimed = true;
+      scrollVideoLogo.play().then(() => {
+        setTimeout(() => scrollVideoLogo.pause(), 40);
+      }).catch(() => {});
+    }
+
     if (introOverlay) {
       introOverlay.addEventListener("wheel", (e) => {
         e.preventDefault();
-        if (!svlReady) return;
+        svlPrime();
         const norm  = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
         const speed = Math.min(Math.abs(e.deltaY), 100) / 100;
         svlTarget = Math.max(0, Math.min(1, svlTarget + norm * speed * 0.022));
@@ -1255,12 +1256,11 @@
 
       let svlLastTY = 0;
       introOverlay.addEventListener("touchstart", (e) => {
-        if (e.touches.length === 1) svlLastTY = e.touches[0].clientY;
+        if (e.touches.length === 1) { svlLastTY = e.touches[0].clientY; svlPrime(); }
       }, { passive: true });
       introOverlay.addEventListener("touchmove", (e) => {
         if (e.touches.length !== 1) return;
         e.preventDefault();
-        if (!svlReady) return;
         const dy    = svlLastTY - e.touches[0].clientY;
         svlLastTY   = e.touches[0].clientY;
         const delta = (dy / window.innerHeight) * 2.0;
@@ -1269,13 +1269,15 @@
     }
 
     function svlTick() {
-      if (svlDur && svlReady) {
+      if (svlDur) {
         const diff = svlTarget - svlCurrent;
         if (Math.abs(diff) > 0.0003) {
-          svlCurrent += diff * 0.08;
+          svlCurrent += diff * 0.09;
           svlCurrent  = Math.max(0, Math.min(1, svlCurrent));
           const p = svlCurrent;
-          const mapped  = SVL_INVERT ? (1 - p) * svlDur * 0.92 : p * svlDur;
+          const mapped  = SVL_INVERT
+            ? Math.max(0.01, (1 - p) * svlDur - 0.08)
+            : Math.min(svlDur - 0.04, p * svlDur + 0.02);
           const clamped = Math.max(0.01, Math.min(svlDur - 0.04, mapped));
           if (Math.abs(clamped - svlLastSeek) > 0.004) {
             scrollVideoLogo.currentTime = clamped;
@@ -1291,6 +1293,8 @@
         }
       }
       requestAnimationFrame(svlTick);
+    }
+    requestAnimationFrame(svlTick);
     }
     requestAnimationFrame(svlTick);
     }
