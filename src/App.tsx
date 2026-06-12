@@ -440,7 +440,7 @@ export default function App() {
 
       {/* ── Main ── */}
       <main className="app-main">
-        <div className="left-panel-container" style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", display: "flex" }}>
+        <div className="left-panel-container" style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", display: "flex", flexDirection: "column" }}>
           {activeMode === "painter" && (
             <MusicPainterVisualizer
               deviceId={painterDeviceId}
@@ -449,7 +449,7 @@ export default function App() {
               filter={painterFilter}
             />
           )}
-          <section className={`panel-webcam ${activeMode === "painter" ? "webcam-corner" : ""}`} style={activeMode === "painter" ? { position: "absolute" } : undefined}>
+          <section className={`panel-webcam ${activeMode === "painter" ? "webcam-corner" : ""}`} style={activeMode === "painter" ? { position: "absolute" } : { width: "100%", height: "100%" }}>
             <h2 className="panel-heading">📷 Cámara</h2>
             <WebcamPreview 
               videoRef={videoRef} 

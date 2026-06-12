@@ -27,6 +27,31 @@ interface Particle {
   gravity?: number;
 }
 
+const FIREWORK_COLORS = ["#74ACDF", "#FFFFFF", "#F6B800"];
+
+const drawFlagRibbon = (
+  ctx2d: CanvasRenderingContext2D,
+  w: number,
+  yCenter: number,
+  height: number,
+  color: string,
+  time: number,
+  lowEnd: number
+) => {
+  ctx2d.beginPath();
+  for (let x = 0; x <= w; x += 15) {
+    const wave = Math.sin(x * 0.004 + time * 1.5) * (15.0 + lowEnd * 35.0) +
+                 Math.cos(x * 0.008 - time * 0.8) * (8.0 + lowEnd * 15.0);
+    const y = yCenter + wave;
+    if (x === 0) ctx2d.moveTo(x, y);
+    else ctx2d.lineTo(x, y);
+  }
+  ctx2d.strokeStyle = color;
+  ctx2d.lineWidth = height;
+  ctx2d.lineCap = "round";
+  ctx2d.stroke();
+};
+
 export default function MusicPainterVisualizer({
   deviceId,
   gain,
@@ -55,11 +80,17 @@ export default function MusicPainterVisualizer({
   const smoothEnergyRef = useRef<number>(0);
   const lastTransientTimeRef = useRef<number>(0);
 
-  // Fluid blob geometry
+  // Fluid blob geometry (Three concentric circles)
   const vertexCount = 32; // Higher vertex count for high-fidelity forms
-  const radiiRef = useRef<number[]>(new Array(vertexCount).fill(100));
-  const xCoordsRef = useRef<number[]>(new Array(vertexCount).fill(0));
-  const yCoordsRef = useRef<number[]>(new Array(vertexCount).fill(0));
+  const radiiRef1 = useRef<number[]>(new Array(vertexCount).fill(100));
+  const radiiRef2 = useRef<number[]>(new Array(vertexCount).fill(100));
+  const radiiRef3 = useRef<number[]>(new Array(vertexCount).fill(100));
+  const xCoordsRef1 = useRef<number[]>(new Array(vertexCount).fill(0));
+  const yCoordsRef1 = useRef<number[]>(new Array(vertexCount).fill(0));
+  const xCoordsRef2 = useRef<number[]>(new Array(vertexCount).fill(0));
+  const yCoordsRef2 = useRef<number[]>(new Array(vertexCount).fill(0));
+  const xCoordsRef3 = useRef<number[]>(new Array(vertexCount).fill(0));
+  const yCoordsRef3 = useRef<number[]>(new Array(vertexCount).fill(0));
 
   // Particles
   const particlesRef = useRef<Particle[]>([]);
@@ -210,11 +241,15 @@ export default function MusicPainterVisualizer({
     resizeCanvas();
     window.addEventListener("resize", resizeCanvas);
 
-    // Initialise radii lists
-    const radii = radiiRef.current;
+    // Initialise radii lists for the three concentric rings
+    const r1 = radiiRef1.current;
+    const r2 = radiiRef2.current;
+    const r3 = radiiRef3.current;
     const initialRadius = Math.min(canvas.width, canvas.height) * 0.16;
     for (let i = 0; i < vertexCount; i++) {
-      radii[i] = initialRadius;
+      r1[i] = initialRadius * 1.25;
+      r2[i] = initialRadius * 0.9;
+      r3[i] = initialRadius * 0.6;
     }
 
     // FFT arrays
@@ -247,13 +282,14 @@ export default function MusicPainterVisualizer({
         analyser.getByteFrequencyData(freqData);
         analyser.getByteTimeDomainData(timeData);
 
-        // 1. Calculate RMS (root-mean-square) amplitude
+        // 1. Calculate RMS (root-mean-square) amplitude (Optimized by sampling every 4th element)
         let rmsSum = 0;
-        for (let i = 0; i < timeData.length; i++) {
+        const step = 4;
+        for (let i = 0; i < timeData.length; i += step) {
           const val = (timeData[i] - 128) / 128; // normalise to -1..1
           rmsSum += val * val;
         }
-        rms = Math.sqrt(rmsSum / timeData.length);
+        rms = Math.sqrt(rmsSum / (timeData.length / step));
 
         const currentGain = gainRef.current;
         const currentGate = noiseGateRef.current;
@@ -324,8 +360,7 @@ export default function MusicPainterVisualizer({
             if (Math.random() < 0.65) {
               const fX = w * (0.15 + Math.random() * 0.7);
               const fY = h * (0.15 + Math.random() * 0.35);
-              const fireworkColors = ["#74ACDF", "#FFFFFF", "#F6B800"];
-              const fwColor = fireworkColors[Math.floor(Math.random() * fireworkColors.length)];
+              const fwColor = FIREWORK_COLORS[Math.floor(Math.random() * FIREWORK_COLORS.length)];
               const fwCount = 12 + Math.floor(Math.random() * 15);
               
               for (let k = 0; k < fwCount; k++) {
@@ -379,60 +414,80 @@ export default function MusicPainterVisualizer({
       const cx = w / 2;
       const cy = h / 2;
       const baseRadius = Math.min(w, h) * 0.16;
-      const scale = 1.0 + lowEnd * 0.75 + transientFlashRef.current * 0.45;
-
-      // Helper function to draw wavy horizontal flag ribbons
-      const drawFlagRibbon = (yCenter: number, height: number, color: string) => {
-        ctx2d.beginPath();
-        for (let x = 0; x <= w; x += 15) {
-          const wave = Math.sin(x * 0.004 + time * 1.5) * (15.0 + lowEnd * 35.0) +
-                       Math.cos(x * 0.008 - time * 0.8) * (8.0 + lowEnd * 15.0);
-          const y = yCenter + wave;
-          if (x === 0) ctx2d.moveTo(x, y);
-          else ctx2d.lineTo(x, y);
-        }
-        ctx2d.strokeStyle = color;
-        ctx2d.lineWidth = height;
-        ctx2d.lineCap = "round";
-        ctx2d.stroke();
-      };
 
       // Draw background Argentine flag waving stripes
       const ribbonHeight = 35 + lowEnd * 25;
-      drawFlagRibbon(h * 0.5 - ribbonHeight, ribbonHeight, "rgba(116, 172, 223, 0.11)"); // Celestial Blue
-      drawFlagRibbon(h * 0.5, ribbonHeight, "rgba(255, 255, 255, 0.11)");               // White
-      drawFlagRibbon(h * 0.5 + ribbonHeight, ribbonHeight, "rgba(116, 172, 223, 0.11)"); // Celestial Blue
+      drawFlagRibbon(ctx2d, w, h * 0.5 - ribbonHeight, ribbonHeight, "rgba(116, 172, 223, 0.11)", time, lowEnd); // Celestial Blue
+      drawFlagRibbon(ctx2d, w, h * 0.5, ribbonHeight, "rgba(255, 255, 255, 0.11)", time, lowEnd);               // White
+      drawFlagRibbon(ctx2d, w, h * 0.5 + ribbonHeight, ribbonHeight, "rgba(116, 172, 223, 0.11)", time, lowEnd); // Celestial Blue
 
-      // Read/write preallocated coordinates (avoids GC allocations)
-      const xCoords = xCoordsRef.current;
-      const yCoords = yCoordsRef.current;
+      // Read/write preallocated coordinates for three rings
+      const xCoords1 = xCoordsRef1.current;
+      const yCoords1 = yCoordsRef1.current;
+      const xCoords2 = xCoordsRef2.current;
+      const yCoords2 = yCoordsRef2.current;
+      const xCoords3 = xCoordsRef3.current;
+      const yCoords3 = yCoordsRef3.current;
 
+      const r1 = radiiRef1.current;
+      const r2 = radiiRef2.current;
+      const r3 = radiiRef3.current;
+
+      // 1. Calculate geometry for Outer Ring (Ring 1)
+      const scale1 = 1.0 + lowEnd * 0.5 + transientFlashRef.current * 0.25;
       for (let i = 0; i < vertexCount; i++) {
         const angle = (i / vertexCount) * Math.PI * 2;
-        
-        // Flower petal formula: forms 8 symmetric petals that "bloom" with sound
-        const petals = 8;
-        const petalAmp = (baseRadius * 0.35) * (0.2 + midHigh * 1.5);
-        const flowerWave = Math.sin(angle * petals + time * 0.5) * petalAmp;
-        
-        // Secondary ripples
-        const ripple = Math.cos(angle * 16 - time * 3.0) * 8.0 * midHigh;
-        const targetRadius = baseRadius * scale + flowerWave + ripple;
+        // Flower blooming with 8 petals modulated by midHigh energy
+        const flowerMod1 = Math.sin(angle * 8) * 0.16 * midHigh;
+        const targetRadius1 = (baseRadius * 1.25) * scale1 * (1.0 + flowerMod1) +
+          Math.sin(angle * 12 + time * 0.4) * (baseRadius * 0.22) * (0.15 + midHigh * 1.8) +
+          Math.cos(angle * 24 - time * 2.0) * 5.0 * midHigh;
 
-        // Transitions: instant expansion, smooth decay contraction
-        const diff = targetRadius - radii[i];
-        if (diff > 0) {
-          radii[i] = targetRadius; // instant attack (no smoothing)
-        } else {
-          radii[i] += diff * 0.07; // smooth linear contract transition
-        }
+        const diff = targetRadius1 - r1[i];
+        if (diff > 0) r1[i] = targetRadius1;
+        else r1[i] += diff * 0.08;
 
-        xCoords[i] = cx + Math.cos(angle) * radii[i];
-        yCoords[i] = cy + Math.sin(angle) * radii[i];
+        xCoords1[i] = cx + Math.cos(angle) * r1[i];
+        yCoords1[i] = cy + Math.sin(angle) * r1[i];
+      }
+
+      // 2. Calculate geometry for Middle Ring (Ring 2)
+      const scale2 = 1.0 + midHigh * 0.45 + transientFlashRef.current * 0.2;
+      for (let i = 0; i < vertexCount; i++) {
+        const angle = (i / vertexCount) * Math.PI * 2;
+        // Flower blooming with 6 petals (offset using cos and a slow rotation for visual variety)
+        const flowerMod2 = Math.cos(angle * 6 + time * 0.2) * 0.14 * midHigh;
+        const targetRadius2 = (baseRadius * 0.9) * scale2 * (1.0 + flowerMod2) +
+          Math.sin(angle * 8 - time * 0.6) * (baseRadius * 0.18) * (0.2 + midHigh * 2.2) +
+          Math.sin(angle * 16 + time * 1.5) * 4.0 * midHigh;
+
+        const diff = targetRadius2 - r2[i];
+        if (diff > 0) r2[i] = targetRadius2;
+        else r2[i] += diff * 0.07;
+
+        xCoords2[i] = cx + Math.cos(angle) * r2[i];
+        yCoords2[i] = cy + Math.sin(angle) * r2[i];
+      }
+
+      // 3. Calculate geometry for Inner Ring (Ring 3)
+      const scale3 = 1.0 + lowEnd * 0.4 + transientFlashRef.current * 0.15;
+      for (let i = 0; i < vertexCount; i++) {
+        const angle = (i / vertexCount) * Math.PI * 2;
+        // Flower blooming with 5 petals responding to lowEnd grave beats
+        const flowerMod3 = Math.sin(angle * 5 - time * 0.1) * 0.12 * lowEnd;
+        const targetRadius3 = (baseRadius * 0.6) * scale3 * (1.0 + flowerMod3) +
+          Math.sin(angle * 6 + time * 0.9) * (baseRadius * 0.15) * (0.2 + lowEnd * 2.0);
+
+        const diff = targetRadius3 - r3[i];
+        if (diff > 0) r3[i] = targetRadius3;
+        else r3[i] += diff * 0.06;
+
+        xCoords3[i] = cx + Math.cos(angle) * r3[i];
+        yCoords3[i] = cy + Math.sin(angle) * r3[i];
       }
 
       // Helper to trace closed bezier blob path
-      const traceClosedBlob = () => {
+      const traceClosedBlob = (xCoords: number[], yCoords: number[]) => {
         ctx2d.beginPath();
         const startX = (xCoords[0] + xCoords[vertexCount - 1]) / 2;
         const startY = (yCoords[0] + yCoords[vertexCount - 1]) / 2;
@@ -447,54 +502,82 @@ export default function MusicPainterVisualizer({
       };
 
       // 1. Decorative Outer Star/Plasma Ring (Dashed, rotating slowly)
-      ctx2d.strokeStyle = "rgba(116, 172, 223, 0.18)"; // Celestial Blue instead of Violet
-      ctx2d.lineWidth = 1.5;
+      ctx2d.strokeStyle = "rgba(116, 172, 223, 0.25)";
+      ctx2d.lineWidth = 1.8;
       ctx2d.setLineDash([4, 12]);
       ctx2d.beginPath();
-      ctx2d.arc(cx, cy, baseRadius * scale * 1.32 + Math.sin(time * 0.7) * 10, 0, Math.PI * 2);
+      ctx2d.arc(cx, cy, baseRadius * scale1 * 1.35 + Math.sin(time * 0.7) * 10, 0, Math.PI * 2);
       ctx2d.stroke();
       ctx2d.setLineDash([]); // Reset dash
 
-      // 2. Layer 1: Glowing Outline (Patriotic Celestial Blue)
-      traceClosedBlob();
-      ctx2d.shadowBlur = 0; // Disable heavy shadowBlur for 60fps
-
-      ctx2d.strokeStyle = "rgba(116, 172, 223, 0.08)";
-      ctx2d.lineWidth = 32 + midHigh * 30;
+      // 2. Draw Outer Ring (Celeste - celestial flag color)
+      traceClosedBlob(xCoords1, yCoords1);
+      ctx2d.shadowBlur = 0;
+      ctx2d.strokeStyle = "rgba(116, 172, 223, 0.25)";
+      ctx2d.lineWidth = 32 + midHigh * 25;
       ctx2d.stroke();
-
-      ctx2d.strokeStyle = "rgba(116, 172, 223, 0.2)";
+      ctx2d.strokeStyle = "rgba(116, 172, 223, 0.55)";
       ctx2d.lineWidth = 16 + midHigh * 15;
       ctx2d.stroke();
-
-      ctx2d.strokeStyle = "rgba(116, 172, 223, 0.5)";
+      ctx2d.strokeStyle = "rgba(116, 172, 223, 0.85)";
       ctx2d.lineWidth = 6 + midHigh * 6;
       ctx2d.stroke();
+      ctx2d.strokeStyle = "rgba(255, 255, 255, 1.0)";
+      ctx2d.lineWidth = 2.5;
+      ctx2d.stroke();
 
-      ctx2d.strokeStyle = "rgba(255, 255, 255, 0.95)";
+      const gradOuter = ctx2d.createRadialGradient(cx, cy, baseRadius * 0.3, cx, cy, baseRadius * scale1 * 1.4);
+      gradOuter.addColorStop(0, "rgba(116, 172, 223, 0.22)");
+      gradOuter.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx2d.fillStyle = gradOuter;
+      traceClosedBlob(xCoords1, yCoords1);
+      ctx2d.fill();
+
+      // 3. Draw Middle Ring (White)
+      traceClosedBlob(xCoords2, yCoords2);
+      ctx2d.strokeStyle = "rgba(255, 255, 255, 0.20)";
+      ctx2d.lineWidth = 28 + midHigh * 22;
+      ctx2d.stroke();
+      ctx2d.strokeStyle = "rgba(255, 255, 255, 0.50)";
+      ctx2d.lineWidth = 12 + midHigh * 12;
+      ctx2d.stroke();
+      ctx2d.strokeStyle = "rgba(255, 255, 255, 0.80)";
+      ctx2d.lineWidth = 5 + midHigh * 5;
+      ctx2d.stroke();
+      ctx2d.strokeStyle = "rgba(116, 172, 223, 0.98)";
+      ctx2d.lineWidth = 2.0;
+      ctx2d.stroke();
+
+      const gradMid = ctx2d.createRadialGradient(cx, cy, baseRadius * 0.2, cx, cy, baseRadius * scale2 * 1.1);
+      gradMid.addColorStop(0, "rgba(255, 255, 255, 0.20)");
+      gradMid.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx2d.fillStyle = gradMid;
+      traceClosedBlob(xCoords2, yCoords2);
+      ctx2d.fill();
+
+      // 4. Draw Inner Ring (Gold - Mayo Sun color)
+      traceClosedBlob(xCoords3, yCoords3);
+      ctx2d.strokeStyle = "rgba(246, 184, 0, 0.25)";
+      ctx2d.lineWidth = 24 + lowEnd * 20;
+      ctx2d.stroke();
+      ctx2d.strokeStyle = "rgba(246, 184, 0, 0.55)";
+      ctx2d.lineWidth = 10 + lowEnd * 12;
+      ctx2d.stroke();
+      ctx2d.strokeStyle = "rgba(246, 184, 0, 0.90)";
+      ctx2d.lineWidth = 4.0 + lowEnd * 4.0;
+      ctx2d.stroke();
+      ctx2d.strokeStyle = "rgba(255, 255, 255, 1.0)";
       ctx2d.lineWidth = 1.5;
       ctx2d.stroke();
 
-      // 3. Layer 2: Mid-range White/Celestial Fluid (Translucent gradient fill)
-      const gradMid = ctx2d.createRadialGradient(cx, cy, baseRadius * 0.2, cx, cy, baseRadius * scale * 1.25);
-      gradMid.addColorStop(0, "rgba(255, 255, 255, 0.25)");
-      gradMid.addColorStop(0.5, "rgba(116, 172, 223, 0.12)");
-      gradMid.addColorStop(1, "rgba(0, 0, 0, 0)");
-      ctx2d.fillStyle = gradMid;
-      traceClosedBlob();
-      ctx2d.fill();
-
-      // 4. Layer 3: Inner Sun-Gold Core
       const gradCore = ctx2d.createRadialGradient(
         cx + Math.sin(time) * 8, cy + Math.cos(time) * 8, 2,
-        cx, cy, baseRadius * 0.68 * scale
+        cx, cy, baseRadius * 0.65 * scale3
       );
-      gradCore.addColorStop(0, "rgba(246, 184, 0, 0.85)"); // Mayo Sun Gold
-      gradCore.addColorStop(0.35, "rgba(255, 255, 255, 0.5)"); // White
-      gradCore.addColorStop(0.7, "rgba(116, 172, 223, 0.18)"); // Celestial Blue
+      gradCore.addColorStop(0, "rgba(246, 184, 0, 0.45)");
       gradCore.addColorStop(1, "rgba(0, 0, 0, 0)");
       ctx2d.fillStyle = gradCore;
-      traceClosedBlob();
+      traceClosedBlob(xCoords3, yCoords3);
       ctx2d.fill();
 
       // 4.5. Sol de Mayo in the Center
@@ -554,13 +637,28 @@ export default function MusicPainterVisualizer({
         }
       }
 
-      // 5. Draw small glowing nodes at every 2nd vertex (Dorado)
-      ctx2d.fillStyle = "#F6B800";
-      const nodeSize = 2.5 + midHigh * 4.5;
+      // 5. Draw small glowing nodes at vertices across the three rings
+      const nodeSize = 2.0 + midHigh * 3.5;
       for (let i = 0; i < vertexCount; i++) {
-        if (i % 2 === 0) {
+        if (i % 4 === 0) {
+          // Outer node (Celeste)
+          ctx2d.fillStyle = "#74ACDF";
           ctx2d.beginPath();
-          ctx2d.arc(xCoords[i], yCoords[i], nodeSize, 0, Math.PI * 2);
+          ctx2d.arc(xCoords1[i], yCoords1[i], nodeSize, 0, Math.PI * 2);
+          ctx2d.fill();
+        }
+        if ((i + 1) % 4 === 0) {
+          // Middle node (White)
+          ctx2d.fillStyle = "#FFFFFF";
+          ctx2d.beginPath();
+          ctx2d.arc(xCoords2[i], yCoords2[i], nodeSize, 0, Math.PI * 2);
+          ctx2d.fill();
+        }
+        if ((i + 2) % 4 === 0) {
+          // Inner node (Gold)
+          ctx2d.fillStyle = "#F6B800";
+          ctx2d.beginPath();
+          ctx2d.arc(xCoords3[i], yCoords3[i], nodeSize, 0, Math.PI * 2);
           ctx2d.fill();
         }
       }
