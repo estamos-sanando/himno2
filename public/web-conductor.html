@@ -948,13 +948,7 @@
         <div class="svl-vignette"></div>
         <!-- Enter button -->
         <button id="btn-ingresar" class="svl-btn-ingresar">Ingresar</button>
-        <!-- Scroll indicator -->
-        <div id="scroll-prompt" style="position:absolute;bottom:clamp(22px,4.5vh,48px);left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:10px;pointer-events:none;z-index:6;color:#74acdf;transition:opacity 0.3s ease;opacity:0;">
-          <div style="width:20px;height:32px;border:2px solid rgba(116,172,223,0.8);border-radius:12px;display:flex;justify-content:center;padding-top:6px;box-sizing:border-box;box-shadow:0 0 12px rgba(116,172,223,0.4);">
-            <div style="width:4px;height:7px;border-radius:3px;background:#74acdf;box-shadow:0 0 6px #74acdf;animation:svl-wheel 1.5s ease-in-out infinite;"></div>
-          </div>
-          <span style="font-size:clamp(9px,1.6vw,11px);font-weight:700;letter-spacing:2.5px;text-transform:uppercase;text-align:center;text-shadow:0 0 16px rgba(116,172,223,0.8);white-space:nowrap;">Desplaza para ingresar a la web</span>
-        </div>
+        <!-- Scroll indicator removed — hand tracking only -->
       </div>
     </div>
 
@@ -1301,8 +1295,8 @@
     let svlLatestLandmarks = null;
     let svlIntroCameraStream = null;
     let svlIntroLandmarker = null;
-    const SVL_PINCH_CLOSED = 0.05;  // fingers together  -> video at t=0 (assembled)
-    const SVL_PINCH_OPEN   = 0.25;  // fingers spread    -> video at end (disassembled)
+    const SVL_PINCH_CLOSED = 0.04;  // fingers together  -> video at t=0 (assembled)
+    const SVL_PINCH_OPEN   = 0.22;  // fingers spread    -> video at end (disassembled)
     function svlPrime() {
       if (svlPrimed || !svlVideo) return;
       svlPrimed = true;
@@ -1397,7 +1391,7 @@
         // Show hint text in the overlay
         const hint = document.createElement("div");
         hint.id = "svl-pinch-hint";
-        hint.textContent = "✋ Juntá y separás los dedos para armar el escudo";
+        hint.textContent = "Mostrá tu mano — abrí o cerrá los dedos para controlar el escudo";
         hint.style.cssText = "position:absolute; top:clamp(24px,4vh,48px); left:50%; transform:translateX(-50%);" +
           "z-index:8; color:rgba(116,172,223,0.85); font-size:clamp(10px,1.5vw,13px);" +
           "font-weight:700; letter-spacing:2.5px; text-transform:uppercase;" +
@@ -1447,16 +1441,15 @@
     initIntroPinchTracking();
 
     function svlTick() {
-      // ── PINCH GESTURE CONTROL ───────────────────────────────────────────────
-      // If MediaPipe detects hand(s) during intro, use thumb-index pinch to scrub the shield video.
-      // This overrides scroll/keyboard when a hand is visible.
+      // ── PINCH GESTURE CONTROL (sole input) ─────────────────────────────────
+      // p=0 → t=0 (shield assembled), p=1 → t=end (shield disassembled)
       let svlPinchOverride = false;
       if (svlLatestLandmarks && svlLatestLandmarks.landmarks && svlLatestLandmarks.landmarks.length > 0) {
         let bestPinch = null;
         for (const marks of svlLatestLandmarks.landmarks) {
           if (marks.length < 21) continue;
-          const thumb = marks[4];   // THUMB_TIP
-          const index = marks[8];   // INDEX_FINGER_TIP
+          const thumb = marks[4]; // THUMB_TIP
+          const index = marks[8]; // INDEX_FINGER_TIP
           const dx = thumb.x - index.x;
           const dy = thumb.y - index.y;
           const dz = (thumb.z || 0) - (index.z || 0);
@@ -1469,66 +1462,40 @@
           ));
           svlTarget = normalised;
           svlPinchOverride = true;
-          svlPrime(); // warm decoder on first hand appearance
-        }
-      }
-
-      // ── KEYBOARD INPUT (only when no hand detected) ─────────────────────────
-      if (!svlPinchOverride) {
-        if (svlKeysPressed["ArrowUp"]) {
           svlPrime();
-          svlTarget = Math.min(1, svlTarget + 0.008);
-        }
-        if (svlKeysPressed["ArrowDown"]) {
-          svlTarget = Math.max(0, svlTarget - 0.008);
         }
       }
 
-      // Dynamic duration check (polls element if svlDur is not set or invalid yet)
+      // Dynamic duration poll
       if (svlVideo && (!svlDur || !isFinite(svlDur) || svlDur <= 0)) {
         const d = svlVideo.duration;
         if (d && !isNaN(d) && isFinite(d) && d > 0) {
           svlDur = d;
-          const initT = Math.max(0.01, d - 0.08);
-          svlVideo.currentTime = initT;
-          svlLastSeek = initT;
+          svlVideo.currentTime = 0.01;
+          svlLastSeek = 0.01;
           svlRevealVideo();
         }
       }
 
       const diff = svlTarget - svlCurrent;
       if (Math.abs(diff) > 0.0001) {
-        svlCurrent += diff * (svlPinchOverride ? 0.18 : 0.09);
+        svlCurrent += diff * (svlPinchOverride ? 0.20 : 0.09);
         svlCurrent  = Math.max(0, Math.min(1, svlCurrent));
         const p = svlCurrent;
 
         const now = performance.now();
-        if (svlDur && isFinite(svlDur) && svlDur > 0 && svlVideo && !svlVideo.seeking && now - svlLastSeekTime > (svlPinchOverride ? 16 : 30)) {
-          // INVERT=true: p=0 → end of video (assembled), p=1 → near start (disassembled)
-          const mapped  = Math.max(0.01, (1 - p) * svlDur - 0.04);
-          const clamped = Math.min(svlDur - 0.04, mapped);
-          if (Math.abs(clamped - svlLastSeek) > 0.01) {
-            svlVideo.currentTime = clamped;
-            svlLastSeek = clamped;
+        const seekThrottle = svlPinchOverride ? 16 : 30;
+        if (svlDur && isFinite(svlDur) && svlDur > 0 && svlVideo && !svlVideo.seeking && now - svlLastSeekTime > seekThrottle) {
+          // NO INVERT: p=0 → t=0 (assembled), p=1 → t=end (disassembled)
+          const target = Math.max(0.01, Math.min(svlDur - 0.04, p * svlDur));
+          if (Math.abs(target - svlLastSeek) > 0.005) {
+            svlVideo.currentTime = target;
+            svlLastSeek = target;
             svlLastSeekTime = now;
           }
         }
-
-        // Fade video out as user scrolls (stays fully visible until 80% scroll)
-        let opacity = "1";
-        if (p > 0.8) {
-          opacity = String(Math.max(0, 1 - (p - 0.8) * 5));
-        }
-        if (svlVideo && svlVideoLoaded) {
-          svlVideo.style.opacity = opacity;
-        }
-
-        if (svlPrompt) {
-          svlPrompt.style.opacity = p < 0.2 ? String(1 - p * 5) : "0";
-        }
-
-        // Auto-enter disabled, user must click the "Ingresar" button
       }
+
       requestAnimationFrame(svlTick);
     }
 

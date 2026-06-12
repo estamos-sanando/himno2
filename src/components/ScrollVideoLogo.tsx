@@ -3,265 +3,142 @@ import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 
 interface ScrollVideoLogoProps {
   onStart: () => void;
-  /** Optional: live MediaPipe hand landmarks to control shield via pinch gesture */
+  /** Live MediaPipe hand landmarks — pinch gesture controls shield assembly */
   handLandmarks?: HandLandmarkerResult | null;
 }
 
-const INVERT = true; // end of video = assembled shield
-
-// Pinch distance thresholds (normalised MediaPipe space, ~0..1)
-const PINCH_CLOSED = 0.05;  // fingers together  → video at t=0  (shield assembled)
-const PINCH_OPEN   = 0.25;  // fingers spread    → video at end  (shield disassembled)
+// Pinch distance thresholds (normalised MediaPipe space)
+// Closed fist / pinch → PINCH_CLOSED  → progress 0 → video at t=0  (shield assembled)
+// Spread fingers       → PINCH_OPEN   → progress 1 → video at end  (shield disassembled)
+const PINCH_CLOSED = 0.04;
+const PINCH_OPEN   = 0.22;
 
 export default function ScrollVideoLogo({ onStart, handLandmarks }: ScrollVideoLogoProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef     = useRef<HTMLVideoElement>(null);
-  const promptRef    = useRef<HTMLDivElement>(null);
 
-  const targetProg  = useRef(0);
-  const currentProg = useRef(0);
-  const lastSeekT   = useRef(-1);
+  const targetProg   = useRef(0);   // 0 = assembled (t=0), 1 = disassembled (t=end)
+  const currentProg  = useRef(0);
+  const lastSeekT    = useRef(-1);
   const lastSeekTime = useRef(0);
-  const rafId       = useRef(0);
-  const durRef      = useRef(0);
-  const videoLoaded = useRef(false);
-  const videoErrored = useRef(false);
-  const keysPressed = useRef<{ [key: string]: boolean }>({});
+  const rafId        = useRef(0);
+  const durRef       = useRef(0);
+  const videoReady   = useRef(false);
+  const primedRef    = useRef(false);
 
-  const primedRef = useRef(false);
-
-  // Store the latest landmarks in a ref so the rAF loop can always read the freshest value
+  // Always keep latest landmarks accessible in the rAF loop without closure stale value
   const landmarksRef = useRef<HandLandmarkerResult | null>(null);
-
-  // Keep landmarksRef in sync with the prop (prop changes every frame from parent)
   useEffect(() => {
     landmarksRef.current = handLandmarks ?? null;
   }, [handLandmarks]);
 
+  // ── VIDEO REVEAL ─────────────────────────────────────────────────────────
   const revealVideo = useCallback(() => {
-    if (videoErrored.current) return;
-    videoLoaded.current = true;
-    if (videoRef.current && videoRef.current.style) {
-      videoRef.current.style.opacity = "1";
-    }
+    videoReady.current = true;
+    if (videoRef.current) videoRef.current.style.opacity = "1";
   }, []);
 
+  // Prime the hardware decoder on first hand detection
   const prime = useCallback(() => {
     if (primedRef.current) return;
     primedRef.current = true;
     revealVideo();
     const v = videoRef.current;
-    if (v) {
-      v.play().then(() => setTimeout(() => v.pause(), 40)).catch(() => {});
-    }
+    if (v) v.play().then(() => setTimeout(() => v.pause(), 40)).catch(() => {});
   }, [revealVideo]);
 
   // ── VIDEO INIT ───────────────────────────────────────────────────────────
   useEffect(() => {
-    // 1. Show scroll prompt shortly after
-    const promptTimer = setTimeout(() => {
-      if (promptRef.current) promptRef.current.style.opacity = "1";
-    }, 300);
-
-    // 2. Try to load video in the background
     const video = videoRef.current;
     if (!video) return;
 
-    const setupVideo = () => {
+    const setup = () => {
       const dur = video.duration;
-      if (!dur || isNaN(dur) || !isFinite(dur) || dur <= 0) return;
+      if (!dur || !isFinite(dur) || dur <= 0) return;
       durRef.current = dur;
-      const initT = INVERT ? Math.max(0.01, dur - 0.08) : 0.02;
+      // Start at t=0 → shield assembled
       video.addEventListener("seeked", revealVideo, { once: true });
-      video.currentTime = initT;
-      lastSeekT.current = initT;
+      video.currentTime = 0.01;
+      lastSeekT.current = 0.01;
     };
 
-    const onError = () => {
-      videoErrored.current = true;
-      console.warn("SVL: video failed");
-    };
-
-    video.addEventListener("loadeddata",     setupVideo, { once: true });
-    video.addEventListener("loadedmetadata", setupVideo, { once: true });
-    video.addEventListener("error",          onError);
-    
-    if (video.readyState >= 2) setupVideo();
-    else if (video.readyState >= 1) setupVideo();
+    video.addEventListener("loadeddata",     setup, { once: true });
+    video.addEventListener("loadedmetadata", setup, { once: true });
+    if (video.readyState >= 2) setup();
+    else if (video.readyState >= 1) setup();
 
     return () => {
-      clearTimeout(promptTimer);
-      video.removeEventListener("loadeddata",     setupVideo);
-      video.removeEventListener("loadedmetadata", setupVideo);
-      video.removeEventListener("error",          onError);
+      video.removeEventListener("loadeddata",     setup);
+      video.removeEventListener("loadedmetadata", setup);
     };
   }, [revealVideo]);
 
-  // ── KEYBOARD LISTENERS ───────────────────────────────────────────────────
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-        e.preventDefault();
-        prime();
-        keysPressed.current[e.key] = true;
-      }
-    };
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-        keysPressed.current[e.key] = false;
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup",   handleKeyUp);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup",   handleKeyUp);
-    };
-  }, [prime]);
-
-  // ── SCROLL / TOUCH ──────────────────────────────────────────────────────
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      prime();
-      const norm = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
-      // Normalized step: base 0.04 scaled slightly based on deltaY magnitude to feel natural
-      const baseStep = 0.04;
-      const step = baseStep * Math.max(0.5, Math.min(2.0, Math.abs(e.deltaY) / 60));
-      targetProg.current = Math.max(0, Math.min(1, targetProg.current + norm * step));
-    };
-
-    let lastTY = 0;
-    const onTouchStart = (e: TouchEvent) => {
-      if (e.touches.length === 1) { lastTY = e.touches[0].clientY; prime(); }
-    };
-    const onTouchMove = (e: TouchEvent) => {
-      if (e.touches.length !== 1) return;
-      e.preventDefault();
-      const dy = lastTY - e.touches[0].clientY;
-      lastTY   = e.touches[0].clientY;
-      targetProg.current = Math.max(0, Math.min(1, targetProg.current + (dy / window.innerHeight) * 2.0));
-    };
-    // Click/tap to progress (mobile fallback)
-    const onClick = () => {
-      prime();
-      targetProg.current = Math.min(1, targetProg.current + 0.15);
-    };
-
-    el.addEventListener("wheel",      onWheel,      { passive: false });
-    el.addEventListener("touchstart", onTouchStart, { passive: true  });
-    el.addEventListener("touchmove",  onTouchMove,  { passive: false });
-    el.addEventListener("click",      onClick);
-    return () => {
-      el.removeEventListener("wheel",      onWheel);
-      el.removeEventListener("touchstart", onTouchStart);
-      el.removeEventListener("touchmove",  onTouchMove);
-      el.removeEventListener("click",      onClick);
-    };
-  }, [prime]);
-
-  // ── rAF LOOP ────────────────────────────────────────────────────────────
+  // ── rAF LOOP — pinch gesture is the ONLY input ───────────────────────────
   useEffect(() => {
     const tick = () => {
-      // ── PINCH GESTURE CONTROL ──────────────────────────────────────────
-      // Calculate thumb-index distance from any detected hand.
-      // This overrides scroll/keyboard input when a hand is visible.
       const lmResult = landmarksRef.current;
-      let pinchOverride = false;
+      let pinchActive = false;
 
       if (lmResult && lmResult.landmarks && lmResult.landmarks.length > 0) {
-        // Use the first detected hand; prefer the hand with lowest pinch distance (most closed)
         let bestPinch: number | null = null;
 
         for (const marks of lmResult.landmarks) {
           if (marks.length < 21) continue;
-          const thumb = marks[4];  // THUMB_TIP
-          const index = marks[8];  // INDEX_FINGER_TIP
-          // Euclidean distance in normalised [0..1] space
+          const thumb = marks[4]; // THUMB_TIP
+          const index = marks[8]; // INDEX_FINGER_TIP
           const dx = thumb.x - index.x;
           const dy = thumb.y - index.y;
-          const dz = thumb.z - index.z;
+          const dz = (thumb.z ?? 0) - (index.z ?? 0);
           const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
           if (bestPinch === null || dist < bestPinch) bestPinch = dist;
         }
 
         if (bestPinch !== null) {
-          // Map distance to progress: closed (PINCH_CLOSED) → 0 (assembled), open (PINCH_OPEN) → 1 (disassembled)
+          // Map distance → normalised progress [0..1]
+          // 0 = closed pinch = assembled (t=0)
+          // 1 = open spread  = disassembled (t=end)
           const normalised = Math.max(0, Math.min(1,
             (bestPinch - PINCH_CLOSED) / (PINCH_OPEN - PINCH_CLOSED)
           ));
-          // Direct assignment (no lerp for responsiveness) — the rAF itself acts as a smoother
           targetProg.current = normalised;
-          pinchOverride = true;
-          // Ensure video is primed so decoder is warm
-          prime();
+          pinchActive = true;
+          prime(); // warm decoder on first detection
         }
       }
 
-      // ── KEYBOARD INPUT (only when no hand detected) ────────────────────
-      if (!pinchOverride) {
-        if (keysPressed.current["ArrowUp"]) {
-          targetProg.current = Math.min(1, targetProg.current + 0.008);
-        }
-        if (keysPressed.current["ArrowDown"]) {
-          targetProg.current = Math.max(0, targetProg.current - 0.008);
-        }
-      }
-
-      // ── DYNAMIC DURATION CHECK ─────────────────────────────────────────
+      // Dynamic duration poll
       const v = videoRef.current;
       if (v && (!durRef.current || !isFinite(durRef.current) || durRef.current <= 0)) {
         const d = v.duration;
         if (d && !isNaN(d) && isFinite(d) && d > 0) {
           durRef.current = d;
-          const initT = INVERT ? Math.max(0.01, d - 0.08) : 0.02;
-          v.currentTime = initT;
-          lastSeekT.current = initT;
+          v.currentTime = 0.01;
+          lastSeekT.current = 0.01;
           revealVideo();
         }
       }
 
       const diff = targetProg.current - currentProg.current;
       if (Math.abs(diff) > 0.0001) {
-        // Lerp smoothing: pinch gets tighter tracking, scroll/keys get gentle easing
-        const lerpFactor = pinchOverride ? 0.18 : 0.09;
-        currentProg.current += diff * lerpFactor;
+        // Tighter lerp when pinch active for crisp real-time response
+        currentProg.current += diff * (pinchActive ? 0.20 : 0.09);
         currentProg.current  = Math.max(0, Math.min(1, currentProg.current));
         const p = currentProg.current;
 
-        // Seek video (throttled to avoid hardware decoder starvation)
+        // Seek video: p=0 → t=0 (assembled), p=1 → t=end (disassembled)
         const dur = durRef.current;
         const now = performance.now();
-        // Pinch gets a tighter seek throttle (16ms ≈ 60fps) for near-instant response
-        const seekThrottle = pinchOverride ? 16 : 30;
+        const seekThrottle = pinchActive ? 16 : 30; // 60fps seeks when hand active
         if (dur && isFinite(dur) && dur > 0 && v && !v.seeking && now - lastSeekTime.current > seekThrottle) {
-          const mapped  = INVERT
-            ? Math.max(0.01, (1 - p) * dur - 0.04)
-            : Math.min(dur - 0.04, p * dur + 0.01);
-          const clamped = Math.max(0.01, Math.min(dur - 0.04, mapped));
-          if (Math.abs(clamped - lastSeekT.current) > 0.005) {
-            v.currentTime   = clamped;
-            lastSeekT.current = clamped;
+          const target  = Math.max(0.01, Math.min(dur - 0.04, p * dur));
+          if (Math.abs(target - lastSeekT.current) > 0.005) {
+            v.currentTime    = target;
+            lastSeekT.current = target;
             lastSeekTime.current = now;
           }
         }
-
-        // Fade video out as user scrolls (stays fully visible until 80% scroll)
-        let opacity = "1";
-        if (p > 0.8) {
-          opacity = String(Math.max(0, 1 - (p - 0.8) * 5));
-        }
-        if (videoLoaded.current && v) {
-          v.style.opacity = opacity;
-        }
-
-        // Fade indicator
-        if (promptRef.current)
-          promptRef.current.style.opacity = p < 0.2 ? String(1 - p * 5) : "0";
       }
+
       rafId.current = requestAnimationFrame(tick);
     };
     rafId.current = requestAnimationFrame(tick);
@@ -269,51 +146,18 @@ export default function ScrollVideoLogo({ onStart, handLandmarks }: ScrollVideoL
   }, [revealVideo, prime]);
 
   // ── RENDER ───────────────────────────────────────────────────────────────
+  const handVisible = !!(handLandmarks && handLandmarks.landmarks && handLandmarks.landmarks.length > 0);
+
   return (
     <div
       ref={containerRef}
       style={{
         position: "absolute", inset: 0, overflow: "hidden",
-        cursor: "pointer", userSelect: "none", WebkitUserSelect: "none",
+        userSelect: "none", WebkitUserSelect: "none",
+        background: "#000", // pure black so mix-blend-mode:screen works perfectly
       }}
     >
-      {/* Deep space background */}
-      <div style={{
-        position: "absolute", inset: 0,
-        background: "radial-gradient(ellipse 90% 90% at 50% 50%, #0a1628 0%, #040810 100%)",
-        zIndex: 0,
-      }} />
-
-      {/* Argentine flag bands */}
-      {[0, 1].map(i => (
-        <div key={i} style={{
-          position: "absolute",
-          ...(i === 0 ? { top: 0 } : { bottom: 0 }),
-          left: 0, right: 0, height: "3px",
-          background: "linear-gradient(90deg, transparent, #74acdf 30%, #fff 50%, #74acdf 70%, transparent)",
-          opacity: 0.55, zIndex: 1,
-          animation: `svl-band 4s ease-in-out ${i === 1 ? "0.5s" : "0s"} infinite`,
-        }} />
-      ))}
-
-      {/* Particles */}
-      <div style={{ position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none" }}>
-        {Array.from({ length: 35 }).map((_, i) => (
-          <div key={i} style={{
-            position: "absolute",
-            left: `${(i * 37 + 11) % 100}%`,
-            top:  `${(i * 53 + 23) % 100}%`,
-            width: `${1 + (i % 3)}px`,
-            height: `${1 + (i % 3)}px`,
-            borderRadius: "50%",
-            background: (["#74acdf", "#ffffff", "#f6b800"] as string[])[i % 3],
-            opacity: 0,
-            animation: `svl-star ${3 + (i % 5)}s ease-in-out ${(i * 0.3) % 4}s infinite`,
-          }} />
-        ))}
-      </div>
-
-      {/* Video — mix-blend-mode: screen eliminates TouchDesigner black background */}
+      {/* Video del escudo — mix-blend-mode:screen elimina el fondo negro de TouchDesigner */}
       <video
         ref={videoRef}
         src="/logo.mp4"
@@ -323,47 +167,89 @@ export default function ScrollVideoLogo({ onStart, handLandmarks }: ScrollVideoL
         style={{
           position: "absolute", inset: 0, width: "100%", height: "100%",
           objectFit: "contain", objectPosition: "center",
-          pointerEvents: "none", zIndex: 3, opacity: 0,
+          pointerEvents: "none", zIndex: 2, opacity: 0,
           transition: "opacity 0.6s ease",
           willChange: "transform", transform: "translateZ(0)",
           mixBlendMode: "screen",
         }}
       />
 
-      {/* Vignette */}
+      {/* Subtle vignette to frame the shield */}
       <div style={{
-        position: "absolute", inset: 0, zIndex: 4, pointerEvents: "none",
-        background: "radial-gradient(ellipse 75% 75% at 50% 48%, transparent 25%, rgba(4,8,16,0.75) 100%)",
+        position: "absolute", inset: 0, zIndex: 3, pointerEvents: "none",
+        background: "radial-gradient(ellipse 80% 80% at 50% 50%, transparent 35%, rgba(0,0,0,0.85) 100%)",
       }} />
 
-      {/* Hand tracking hint — shown when hand landmarks are detected */}
-      {handLandmarks && handLandmarks.landmarks && handLandmarks.landmarks.length > 0 && (
-        <div style={{
-          position: "absolute",
-          top: "clamp(24px, 4vh, 48px)",
-          left: "50%",
-          transform: "translateX(-50%)",
-          zIndex: 8,
-          color: "rgba(116,172,223,0.85)",
-          fontSize: "clamp(10px, 1.5vw, 13px)",
-          fontWeight: 700,
-          letterSpacing: "2.5px",
-          textTransform: "uppercase",
-          textShadow: "0 0 12px rgba(116,172,223,0.6)",
-          pointerEvents: "none",
-          animation: "svl-hint-fadein 0.4s ease",
-          whiteSpace: "nowrap",
-        }}>
-          ✋ Juntá y separás los dedos para armar el escudo
-        </div>
-      )}
+      {/* Hand detection status indicator (top-center) */}
+      <div style={{
+        position: "absolute",
+        top: "clamp(20px, 3.5vh, 40px)",
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: 8,
+        color: handVisible ? "rgba(116,172,223,0.9)" : "rgba(116,172,223,0.35)",
+        fontSize: "clamp(10px, 1.4vw, 13px)",
+        fontWeight: 700,
+        letterSpacing: "2.5px",
+        textTransform: "uppercase",
+        textShadow: handVisible ? "0 0 16px rgba(116,172,223,0.7)" : "none",
+        pointerEvents: "none",
+        transition: "all 0.4s ease",
+        whiteSpace: "nowrap",
+      }}>
+        {handVisible
+          ? "✋ Mano detectada — abrí o cerrá los dedos"
+          : "Mostrá la mano a la cámara"}
+      </div>
 
-      {/* Enter button */}
+      {/* Pinch visualizer — small indicator at bottom showing current pinch level */}
+      <div style={{
+        position: "absolute",
+        bottom: "clamp(100px, 16vh, 160px)",
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: 8,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "8px",
+        pointerEvents: "none",
+        opacity: handVisible ? 1 : 0,
+        transition: "opacity 0.4s ease",
+      }}>
+        <div style={{
+          width: "120px",
+          height: "4px",
+          borderRadius: "2px",
+          background: "rgba(116,172,223,0.2)",
+          border: "1px solid rgba(116,172,223,0.3)",
+          overflow: "hidden",
+        }}>
+          <div style={{
+            height: "100%",
+            width: `${currentProg.current * 100}%`,
+            background: "linear-gradient(90deg, #74acdf, #ffffff)",
+            borderRadius: "2px",
+            transition: "width 0.05s linear",
+          }} />
+        </div>
+        <span style={{
+          fontSize: "9px",
+          letterSpacing: "2px",
+          color: "rgba(116,172,223,0.6)",
+          textTransform: "uppercase",
+          fontWeight: 700,
+        }}>
+          🤏 ← cerrar · abrir → ✋
+        </span>
+      </div>
+
+      {/* Ingresar button */}
       <button
         onClick={onStart}
         style={{
           position: "absolute",
-          bottom: "clamp(80px, 15vh, 140px)",
+          bottom: "clamp(30px, 7vh, 70px)",
           left: "50%",
           transform: "translateX(-50%)",
           zIndex: 10,
@@ -373,14 +259,14 @@ export default function ScrollVideoLogo({ onStart, handLandmarks }: ScrollVideoL
           padding: "14px 48px",
           color: "#ffffff",
           fontFamily: "inherit",
-          fontSize: "clamp(13px, 1.8vw, 15px)",
+          fontSize: "clamp(12px, 1.6vw, 14px)",
           fontWeight: 700,
           letterSpacing: "3px",
           textTransform: "uppercase",
           cursor: "pointer",
           boxShadow: "0 0 20px rgba(116,172,223,0.2), inset 0 0 10px rgba(116,172,223,0.1)",
           transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
-          animation: "svl-btn-fadein 1s ease forwards, svl-btn-pulse 2s infinite alternate",
+          animation: "svl-btn-fadein 1.2s ease forwards, svl-btn-pulse 2.5s infinite alternate",
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.background = "linear-gradient(135deg, rgba(116,172,223,0.3) 0%, rgba(116,172,223,0.1) 100%)";
@@ -398,70 +284,14 @@ export default function ScrollVideoLogo({ onStart, handLandmarks }: ScrollVideoL
         Ingresar
       </button>
 
-      {/* Scroll indicator */}
-      <div
-        ref={promptRef}
-        style={{
-          position: "absolute",
-          bottom: "clamp(22px, 4.5vh, 48px)",
-          left: "50%", transform: "translateX(-50%)",
-          display: "flex", flexDirection: "column",
-          alignItems: "center", gap: "10px",
-          pointerEvents: "none", zIndex: 6,
-          color: "#74acdf",
-          textShadow: "0 0 14px rgba(116,172,223,0.9)",
-          opacity: 0, transition: "opacity 0.3s ease",
-        }}
-      >
-        <div style={{
-          width: "20px", height: "32px",
-          border: "2px solid rgba(116,172,223,0.8)",
-          borderRadius: "12px", display: "flex",
-          justifyContent: "center", paddingTop: "6px",
-          boxSizing: "border-box",
-          boxShadow: "0 0 12px rgba(116,172,223,0.4)",
-        }}>
-          <div style={{
-            width: "4px", height: "7px", borderRadius: "3px",
-            background: "#74acdf", boxShadow: "0 0 6px #74acdf",
-            animation: "svl-wheel 1.5s ease-in-out infinite",
-          }} />
-        </div>
-        <span style={{
-          fontSize: "clamp(9px, 1.6vw, 11px)", fontWeight: 700,
-          letterSpacing: "2.5px", textTransform: "uppercase",
-          textAlign: "center", whiteSpace: "nowrap",
-        }}>
-          Desplaza o usá la mano para armar el escudo
-        </span>
-      </div>
-
       <style>{`
-        @keyframes svl-wheel {
-          0%   { opacity: 0; transform: translateY(0); }
-          20%  { opacity: 1; }
-          80%  { opacity: 0.15; transform: translateY(10px); }
-          100% { opacity: 0; transform: translateY(0); }
-        }
-        @keyframes svl-star {
-          0%, 100% { opacity: 0; transform: scale(0.5); }
-          50%       { opacity: 0.5; transform: scale(1); }
-        }
-        @keyframes svl-band {
-          0%, 100% { opacity: 0.2; transform: scaleX(0.6); }
-          50%       { opacity: 0.6; transform: scaleX(1); }
-        }
         @keyframes svl-btn-fadein {
-          from { opacity: 0; transform: translate(-50%, 15px); }
-          to { opacity: 1; transform: translate(-50%, 0); }
+          from { opacity: 0; transform: translate(-50%, 12px); }
+          to   { opacity: 1; transform: translate(-50%, 0); }
         }
         @keyframes svl-btn-pulse {
-          0% { box-shadow: 0 0 20px rgba(116,172,223,0.2), inset 0 0 10px rgba(116,172,223,0.1); }
+          0%   { box-shadow: 0 0 20px rgba(116,172,223,0.2), inset 0 0 10px rgba(116,172,223,0.1); }
           100% { box-shadow: 0 0 30px rgba(116,172,223,0.4), inset 0 0 15px rgba(116,172,223,0.2); }
-        }
-        @keyframes svl-hint-fadein {
-          from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
-          to   { opacity: 1; transform: translateX(-50%) translateY(0); }
         }
       `}</style>
     </div>
