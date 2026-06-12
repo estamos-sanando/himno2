@@ -1,275 +1,278 @@
-import React, { useRef, useEffect, useState } from "react";
+import { useRef, useEffect } from "react";
 
 interface ScrollVideoLogoProps {
   onStart: () => void;
+  /** If true: video starts at the END (shield assembled) and scrolling down disassembles it. */
   invertDirection?: boolean;
 }
 
 export default function ScrollVideoLogo({ onStart, invertDirection = true }: ScrollVideoLogoProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  
-  const targetProgress = useRef(0);
+  const videoRef    = useRef<HTMLVideoElement>(null);
+  const canvasRef   = useRef<HTMLCanvasElement>(null);
+
+  // All progress tracking lives in refs — never in React state — to avoid re-renders in the rAF loop
+  const targetProgress  = useRef(0);
   const currentProgress = useRef(0);
-  const [progressState, setProgressState] = useState(0);
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [videoDuration, setVideoDuration] = useState(0);
+  const lastSeekTime    = useRef(-1);     // tracks last video.currentTime we wrote
+  const frameId         = useRef(0);
+  const enteredRef      = useRef(false);  // guard: only fire onStart once
 
-  // Handle video metadata loaded
-  const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
-    const video = e.currentTarget;
-    setVideoDuration(video.duration);
-    setIsLoaded(true);
-    
-    // Play and immediately pause to ensure the browser initializes the video decoder for seeking
-    video.play().then(() => {
-      video.pause();
-      if (invertDirection) {
-        video.currentTime = video.duration;
-      } else {
-        video.currentTime = 0;
-      }
-    }).catch(err => {
-      console.log("Video auto-play/pause failed:", err);
-      if (invertDirection) {
-        video.currentTime = video.duration;
-      } else {
-        video.currentTime = 0;
-      }
-    });
-  };
+  // ── VIDEO LOAD & DECODER INIT ──────────────────────────────────────────
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
 
-  // Wheel and Touch Event Listeners bound to full-screen container
+    const onMeta = () => {
+      const dur = video.duration;
+      if (!dur || isNaN(dur)) return;
+
+      // Set initial frame immediately (no React state)
+      const initTime = invertDirection ? dur - 0.04 : 0.01;
+      video.currentTime = initTime;
+      lastSeekTime.current = initTime;
+
+      // Play→pause cycle primes the hardware decoder (required on Chrome mobile)
+      video.play().then(() => {
+        video.pause();
+        video.currentTime = initTime;
+      }).catch(() => {
+        video.currentTime = initTime;
+      });
+
+      // Show video
+      video.style.opacity = "1";
+
+      // Hide loading placeholder
+      const placeholder = containerRef.current?.querySelector<HTMLDivElement>(".vml-loading");
+      if (placeholder) placeholder.style.display = "none";
+    };
+
+    if (video.readyState >= 1 && video.duration) {
+      onMeta();
+    } else {
+      video.addEventListener("loadedmetadata", onMeta, { once: true });
+    }
+
+    return () => video.removeEventListener("loadedmetadata", onMeta);
+  }, [invertDirection]);
+
+  // ── SCROLL / TOUCH INPUT ──────────────────────────────────────────────
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    // Mouse wheel handler
-    const handleWheel = (e: WheelEvent) => {
-      // Prevent default page scrolling while interacting with the intro
+    // Wheel (mouse & trackpad)
+    const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      
-      const sensitivity = 0.0008; // Adjust scroll speed here
-      let newProgress = targetProgress.current + e.deltaY * sensitivity;
-      newProgress = Math.max(0, Math.min(1, newProgress));
-      
-      targetProgress.current = newProgress;
+      // Normalize: mouse wheels give ~100 per notch, trackpads give 1-5
+      const normalised = e.deltaY / Math.max(Math.abs(e.deltaY), 1);
+      const delta = normalised * 0.015;   // 0.015 per "click" → ~67 clicks to traverse
+      targetProgress.current = Math.max(0, Math.min(1, targetProgress.current + delta));
     };
 
-    // Mobile touch swipe handlers
-    let touchStartY = 0;
-    const handleTouchStart = (e: TouchEvent) => {
-      if (e.touches.length === 1) {
-        touchStartY = e.touches[0].clientY;
-      }
+    // Touch (swipe up = disassemble)
+    let lastTouchY = 0;
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 1) lastTouchY = e.touches[0].clientY;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      e.preventDefault();
+      const dy = lastTouchY - e.touches[0].clientY; // + = swipe up
+      lastTouchY = e.touches[0].clientY;
+      const delta = (dy / window.innerHeight) * 1.8; // one full-screen swipe ≈ 1.8× range
+      targetProgress.current = Math.max(0, Math.min(1, targetProgress.current + delta));
     };
 
-    const handleTouchMove = (e: TouchEvent) => {
-      if (e.touches.length === 1) {
-        const currentY = e.touches[0].clientY;
-        const deltaY = touchStartY - currentY; // Positive when swiping up (scrolling down)
-        touchStartY = currentY;
-        
-        const sensitivity = 0.002; // Touch swipe sensitivity
-        let newProgress = targetProgress.current + deltaY * sensitivity;
-        newProgress = Math.max(0, Math.min(1, newProgress));
-        
-        targetProgress.current = newProgress;
-        e.preventDefault(); // Block pull-to-refresh or page bouncing
-      }
-    };
-
-    // Attach listeners with passive: false to allow preventDefault
-    container.addEventListener("wheel", handleWheel, { passive: false });
-    container.addEventListener("touchstart", handleTouchStart, { passive: true });
-    container.addEventListener("touchmove", handleTouchMove, { passive: false });
-
+    container.addEventListener("wheel",      onWheel,      { passive: false });
+    container.addEventListener("touchstart", onTouchStart, { passive: true  });
+    container.addEventListener("touchmove",  onTouchMove,  { passive: false });
     return () => {
-      container.removeEventListener("wheel", handleWheel);
-      container.removeEventListener("touchstart", handleTouchStart);
-      container.removeEventListener("touchmove", handleTouchMove);
+      container.removeEventListener("wheel",      onWheel);
+      container.removeEventListener("touchstart", onTouchStart);
+      container.removeEventListener("touchmove",  onTouchMove);
     };
   }, []);
 
-  // Smooth Interpolation Bucle (Lerp)
+  // ── rAF LOOP — zero React state mutations ─────────────────────────────
   useEffect(() => {
-    let frameId: number;
-    
-    const updateVideoFrame = () => {
+    const LERP_SPEED     = 0.10;   // lower = smoother but slower response
+    const SEEK_THRESHOLD = 0.003;  // only seek if mapped time changed by >3ms
+    const AUTO_TRIGGER   = 0.97;   // fire onStart when progress reaches this
+
+    const tick = () => {
       const video = videoRef.current;
       if (video && video.duration && !isNaN(video.duration)) {
         const diff = targetProgress.current - currentProgress.current;
-        
-        // Lowered threshold to 0.0001 so small scroll increments are not ignored
-        if (Math.abs(diff) > 0.0001) {
-          const lerpFactor = 0.12; // Slightly slower for buttery smooth cinematic motion
-          currentProgress.current += diff * lerpFactor;
-          
-          // Clamp current progress
+
+        if (Math.abs(diff) > 0.0005) {
+          currentProgress.current += diff * LERP_SPEED;
           currentProgress.current = Math.max(0, Math.min(1, currentProgress.current));
-          
-          // Map progress to video currentTime
-          const mappedTime = invertDirection
-            ? (1 - currentProgress.current) * video.duration
-            : currentProgress.current * video.duration;
-            
-          // Set video time (safety bounds: 0 to duration - 0.04s)
-          video.currentTime = Math.max(0, Math.min(video.duration - 0.04, mappedTime));
-          setProgressState(currentProgress.current);
+
+          const p = currentProgress.current;
+
+          // Map to video time
+          const mapped = invertDirection
+            ? (1 - p) * video.duration
+            : p * video.duration;
+          const clamped = Math.max(0, Math.min(video.duration - 0.04, mapped));
+
+          // Only write currentTime if it actually moved — avoids seek thrash
+          if (Math.abs(clamped - lastSeekTime.current) > SEEK_THRESHOLD) {
+            video.currentTime = clamped;
+            lastSeekTime.current = clamped;
+          }
+
+          // Update scroll indicator opacity (direct DOM mutation — no React state)
+          const indicator = containerRef.current?.querySelector<HTMLElement>(".vml-indicator");
+          if (indicator) {
+            indicator.style.opacity = p < 0.15 ? String(1 - p * 6.6) : "0";
+          }
+
+          // Auto-enter when shield is fully disassembled
+          if (p >= AUTO_TRIGGER && !enteredRef.current) {
+            enteredRef.current = true;
+            onStart();
+          }
         }
       }
-      
-      frameId = requestAnimationFrame(updateVideoFrame);
+
+      frameId.current = requestAnimationFrame(tick);
     };
 
-    frameId = requestAnimationFrame(updateVideoFrame);
-    return () => cancelAnimationFrame(frameId);
-  }, [invertDirection]);
+    frameId.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frameId.current);
+  }, [invertDirection, onStart]);
 
+  // ── RENDER ────────────────────────────────────────────────────────────
   return (
-    <div 
+    <div
       ref={containerRef}
-      className="scroll-video-logo-container"
       style={{
         position: "absolute",
         inset: 0,
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        cursor: "ns-resize",
         overflow: "hidden",
-        background: "#000"
+        background: "#000",
+        // Promote to GPU layer for zero-cost compositing
+        willChange: "transform",
+        transform: "translateZ(0)",
       }}
     >
+      {/* Loading placeholder */}
+      <div
+        className="vml-loading"
+        style={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "rgba(255,255,255,0.4)",
+          fontSize: "14px",
+          letterSpacing: "2px",
+          textTransform: "uppercase",
+          zIndex: 2,
+        }}
+      >
+        Cargando…
+      </div>
+
+      {/* Video — GPU layer, cover the full screen */}
       <video
         ref={videoRef}
         src="/logo.mp4"
         muted
         playsInline
         preload="auto"
-        onLoadedMetadata={handleLoadedMetadata}
         style={{
           position: "absolute",
-          top: 0,
-          left: 0,
+          inset: 0,
           width: "100%",
           height: "100%",
           objectFit: "cover",
-          objectPosition: "center",
-          pointerEvents: "none", // Prevent native video controls or clicks
-          opacity: isLoaded ? 1 : 0,
-          transition: "opacity 0.8s ease"
+          pointerEvents: "none",
+          opacity: 0,                     // shown once loaded (set inline by effect)
+          transition: "opacity 0.5s ease",
+          willChange: "transform",
+          transform: "translateZ(0)",
         }}
       />
 
-      {!isLoaded && (
-        <div style={{ position: "absolute", color: "var(--text-muted)", fontSize: "16px", zIndex: 10 }}>
-          Cargando visual...
-        </div>
-      )}
+      {/* Vignette overlay */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background:
+            "radial-gradient(ellipse at 50% 50%, transparent 30%, rgba(0,0,0,0.65) 100%)",
+          pointerEvents: "none",
+          zIndex: 2,
+        }}
+      />
 
-      {isLoaded && (
-        <>
-          {/* Subtle vignette/radial gradient to enhance contrast */}
-          <div 
+      {/* Scroll indicator — opacity mutated directly in rAF */}
+      <div
+        className="vml-indicator"
+        style={{
+          position: "absolute",
+          bottom: "clamp(24px, 5vh, 48px)",
+          left: "50%",
+          transform: "translateX(-50%)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: "8px",
+          pointerEvents: "none",
+          zIndex: 5,
+          color: "var(--cyan, #00f2fe)",
+          textShadow: "0 0 12px rgba(0,242,254,0.9)",
+          opacity: 1,
+          transition: "opacity 0.2s ease",
+        }}
+      >
+        <div
+          style={{
+            width: "18px",
+            height: "28px",
+            border: "2px solid currentColor",
+            borderRadius: "10px",
+            display: "flex",
+            justifyContent: "center",
+            paddingTop: "5px",
+          }}
+        >
+          <div
             style={{
-              position: "absolute",
-              inset: 0,
-              background: "radial-gradient(circle, rgba(0,0,0,0) 40%, rgba(0,0,0,0.6) 100%)",
-              pointerEvents: "none",
-              zIndex: 1
+              width: "4px",
+              height: "6px",
+              borderRadius: "3px",
+              background: "currentColor",
+              animation: "vml-wheel 1.4s ease-in-out infinite",
             }}
           />
+        </div>
+        <span
+          style={{
+            fontSize: "clamp(9px, 1.5vw, 11px)",
+            fontWeight: 700,
+            letterSpacing: "2px",
+            textTransform: "uppercase",
+          }}
+        >
+          Desliza para desarmar
+        </span>
+      </div>
 
-          {/* Mouse Scroll Indicator (Bottom Center) */}
-          <div
-            className="scroll-prompt-indicator"
-            style={{
-              position: "absolute",
-              bottom: "40px",
-              left: "50%",
-              transform: "translateX(-50%)",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "6px",
-              opacity: progressState < 0.15 ? 1 - (progressState * 6.6) : 0,
-              pointerEvents: "none",
-              transition: "opacity 0.3s ease",
-              color: "var(--cyan)",
-              textShadow: "0 0 10px rgba(0, 242, 254, 0.8)",
-              zIndex: 5
-            }}
-          >
-            {/* Animated mouse icon */}
-            <div 
-              className="mouse-icon"
-              style={{
-                width: "16px",
-                height: "26px",
-                border: "2px solid var(--cyan)",
-                borderRadius: "10px",
-                position: "relative",
-                display: "flex",
-                justifyContent: "center"
-              }}
-            >
-              <div 
-                className="mouse-dot"
-                style={{
-                  width: "4px",
-                  height: "6px",
-                  background: "var(--cyan)",
-                  borderRadius: "50%",
-                  marginTop: "4px",
-                  animation: "mouse-wheel-scroll 1.5s infinite"
-                }}
-              />
-            </div>
-            <span style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase" }}>
-              Desplaza para desarmar
-            </span>
-          </div>
-
-          {/* Comenzar button in bottom right corner */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onStart();
-            }}
-            style={{
-              position: "absolute",
-              bottom: "40px",
-              right: "40px",
-              zIndex: 10,
-              background: "linear-gradient(135deg, var(--cyan), var(--purple))",
-              color: "#fff",
-              border: "none",
-              padding: "16px 36px",
-              fontSize: "15px",
-              fontWeight: 700,
-              borderRadius: "30px",
-              cursor: "pointer",
-              boxShadow: "0 0 20px rgba(0, 242, 254, 0.4), 0 0 40px rgba(157, 78, 221, 0.2)",
-              transition: "all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)",
-              letterSpacing: "1px",
-              textTransform: "uppercase"
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = "translateY(-3px) scale(1.05)";
-              e.currentTarget.style.boxShadow = "0 0 30px rgba(0, 242, 254, 0.6), 0 0 50px rgba(157, 78, 221, 0.4)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "none";
-              e.currentTarget.style.boxShadow = "0 0 20px rgba(0, 242, 254, 0.4), 0 0 40px rgba(157, 78, 221, 0.2)";
-            }}
-          >
-            Comenzar
-          </button>
-        </>
-      )}
+      {/* Keyframe for wheel dot — injected once via style tag */}
+      <style>{`
+        @keyframes vml-wheel {
+          0%   { opacity: 0;   transform: translateY(0); }
+          25%  { opacity: 1; }
+          75%  { opacity: 0.2; transform: translateY(8px); }
+          100% { opacity: 0;   transform: translateY(0); }
+        }
+      `}</style>
     </div>
   );
 }
