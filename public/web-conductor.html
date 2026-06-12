@@ -930,6 +930,20 @@
       border: 1px solid #F6B800;
       box-shadow: 0 0 8px rgba(246, 184, 0, 0.2);
     }
+
+    /* Music Painter Styles */
+    .webcam-canvas.webcam-corner {
+      position: absolute !important;
+      bottom: 20px !important;
+      right: 20px !important;
+      width: 200px !important;
+      height: 150px !important;
+      border-radius: 12px !important;
+      border: 1px solid rgba(116, 172, 223, 0.4) !important;
+      box-shadow: 0 0 20px rgba(116, 172, 223, 0.15), 0 4px 24px rgba(0,0,0,0.6) !important;
+      z-index: 10 !important;
+      transition: all 0.4s ease;
+    }
   </style>
 </head>
 <body>
@@ -1081,6 +1095,7 @@
       <div class="header-modes">
         <button id="btn-mode-conductor" class="btn-mode-toggle active">🎼 Conductor</button>
         <button id="btn-mode-instrument" class="btn-mode-toggle">🎹 Instrumento</button>
+        <button id="btn-mode-painter" class="btn-mode-toggle">🎨 Pintar</button>
       </div>
 
       <div id="header-song-block" class="header-song" style="color: var(--cyan); border-color: rgba(0, 245, 255, 0.25);">
@@ -1106,6 +1121,15 @@
         <div class="webcam-wrapper">
           <video id="webcam-video" style="display: none;" autoplay playsinline muted></video>
           <canvas id="webcam-canvas" class="webcam-canvas"></canvas>
+          <canvas id="painter-canvas" style="display: none; position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; background: #000000;"></canvas>
+          <div id="painter-start-overlay" style="display: none; position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(12px); z-index: 30; padding: 20px; text-align: center;">
+            <div class="card-glass" style="padding: 40px; border-radius: 20px; border: 1px solid var(--border-glass); max-width: 400px; box-shadow: 0 0 40px rgba(0, 229, 255, 0.1); background: rgba(11, 13, 25, 0.85); backdrop-filter: blur(8px);">
+              <h3 style="margin: 0 0 12px 0; font-size: 22px; font-weight: 700; color: #ffffff; font-family: inherit;">Activar Sensor Visual 🎨</h3>
+              <p style="color: var(--text-secondary); font-size: 13px; line-height: 1.5; margin-bottom: 28px; font-family: inherit;">Para iniciar el lienzo de síntesis generativa, es necesario habilitar la entrada del micrófono o instrumento.</p>
+              <button id="btn-painter-start" style="background: linear-gradient(135deg, rgba(0, 229, 255, 0.25) 0%, rgba(255, 0, 127, 0.15) 100%); border: 1px solid rgba(0, 229, 255, 0.7); border-radius: 30px; padding: 14px 36px; color: #ffffff; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; cursor: pointer; box-shadow: 0 0 20px rgba(0, 229, 255, 0.3); font-family: inherit; outline: none; border-style: solid;">Iniciar Pintor</button>
+              <div id="painter-error-msg" style="color: #FF007F; font-size: 12px; margin-top: 16px; font-weight: 600; display: none;"></div>
+            </div>
+          </div>
           
           <div id="webcam-loading" class="webcam-loading" style="display: none;">
             <div class="spinner"></div>
@@ -1269,6 +1293,72 @@
           </div>
         </div>
 
+        <!-- Painter Input Card (Painter Mode) -->
+        <div id="cd-block-painter-input" class="cd-block" style="display: none; padding: 16px;">
+          <div class="cd-block-label" style="margin-bottom: 10px;">
+            🎙️ Entrada de Audio
+          </div>
+          <select id="painter-device-select" style="
+            width: 100%;
+            padding: 10px;
+            border-radius: 8px;
+            background: rgba(11, 13, 25, 0.8);
+            border: 1px solid var(--border-glass);
+            color: #ffffff;
+            font-size: 13px;
+            outline: none;
+            cursor: pointer;
+            font-family: inherit;
+          ">
+            <option value="">Cargando entradas...</option>
+          </select>
+        </div>
+
+        <!-- Painter Level & Sliders Card (Painter Mode) -->
+        <div id="cd-block-painter-controls" class="cd-block" style="display: none; padding: 16px; flex-direction: column; gap: 16px;">
+          <!-- Level meter -->
+          <div style="width: 100%;">
+            <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 6px;">
+              <span>🎚️ Nivel de Entrada</span>
+              <span id="painter-level-text" style="color: #00E5FF;">0%</span>
+            </div>
+            <div style="height: 8px; background: rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden; border: 1px solid var(--border-glass); position: relative;">
+              <div id="painter-level-bar" style="height: 100%; width: 0%; background: linear-gradient(90deg, #00E5FF, #FF007F); transition: width 0.05s linear;"></div>
+              <div id="painter-level-gate" style="position: absolute; top: 0; bottom: 0; left: 15%; width: 2px; background: #FF007F; box-shadow: 0 0 6px #FF007F; pointer-events: none;"></div>
+            </div>
+          </div>
+
+          <!-- Gain slider -->
+          <div style="width: 100%;">
+            <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 6px;">
+              <span>⚡ Amplificación</span>
+              <span id="painter-gain-text" style="color: #ffffff;">3.0x</span>
+            </div>
+            <input id="painter-gain-slider" type="range" min="1.0" max="10.0" step="0.1" value="3.0" style="width: 100%; accent-color: #00E5FF; cursor: pointer;">
+          </div>
+
+          <!-- Noise gate slider -->
+          <div style="width: 100%;">
+            <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 6px;">
+              <span>🔇 Puerta de Ruido</span>
+              <span id="painter-gate-text" style="color: #ffffff;">15</span>
+            </div>
+            <input id="painter-gate-slider" type="range" min="0.001" max="0.099" step="0.001" value="0.015" style="width: 100%; accent-color: #FF007F; cursor: pointer;">
+          </div>
+        </div>
+
+        <!-- Painter Guide Card (Painter Mode) -->
+        <div id="cd-block-painter-guide" class="cd-block" style="display: none; padding: 16px; font-size: 12px; line-height: 1.5; flex-direction: column;">
+          <div class="cd-block-label" style="margin-bottom: 10px;">
+            🎓 Comportamiento Reactivo
+          </div>
+          <ul style="padding-left: 16px; margin: 0; display: flex; flex-direction: column; gap: 8px; color: rgba(255, 255, 255, 0.75);">
+            <li><strong style="color: #00E5FF;">Graves (40-200Hz)</strong>: Controlan la <strong>expansión y escala</strong> del cuerpo fluido.</li>
+            <li><strong style="color: #9D4EDD;">Medios/Agudos (200-2kHz)</strong>: Generan <strong>complejidad fractal y ondulaciones</strong> en el borde.</li>
+            <li><strong style="color: #FF007F;">Transitorios (Ataques)</strong>: Disparan <strong>ráfagas de partículas neón</strong> en forma radial.</li>
+          </ul>
+        </div>
+
         <!-- System Status -->
         <div id="cd-status" class="cd-status">
           <span class="cd-status-dot"></span>
@@ -1322,7 +1412,10 @@
       leftHandDetected: false,
       rightHandDetected: false,
       modelLoaded: false,
-      activeMode: "conductor", // "conductor" or "instrument"
+      activeMode: "conductor", // "conductor" or "instrument" or "painter"
+      painterDeviceId: "",
+      painterGain: 3.0,
+      painterNoiseGate: 0.015,
       synthWaveform: "piano",
       synthOctave: 4,
       snapEnabled: true,
@@ -2762,6 +2855,7 @@
     // ── INSTRUMENT INTERACTION & MODE HANDLERS ──
     const btnModeConductor = document.getElementById("btn-mode-conductor");
     const btnModeInstrument = document.getElementById("btn-mode-instrument");
+    const btnModePainter = document.getElementById("btn-mode-painter");
     const headerSongBlock = document.getElementById("header-song-block");
 
     const blockInstChord = document.getElementById("cd-block-inst-chord");
@@ -2778,12 +2872,80 @@
       setMode("instrument");
     });
 
+    btnModePainter.addEventListener("click", () => {
+      if (state.activeMode === "painter") return;
+      setMode("painter");
+    });
+
     function setMode(mode) {
       state.activeMode = mode;
       
+      if (mode === "painter") {
+        btnModeConductor.classList.remove("active");
+        btnModeInstrument.classList.remove("active");
+        btnModePainter.classList.add("active");
+        if (headerSongBlock) headerSongBlock.style.display = "none";
+        if (btnPlayToggle) btnPlayToggle.style.display = "none";
+        if (document.getElementById("btn-instructions")) document.getElementById("btn-instructions").style.display = "none";
+
+        blockLeft.style.display = "none";
+        blockRight.style.display = "none";
+        if (blockInstChord) blockInstChord.style.display = "none";
+        if (blockInstKeys) blockInstKeys.style.display = "none";
+        if (blockInstControls) blockInstControls.style.display = "none";
+        
+        if (blockPainterInput) blockPainterInput.style.display = "block";
+        if (blockPainterControls) blockPainterControls.style.display = "flex";
+        if (blockPainterGuide) blockPainterGuide.style.display = "flex";
+
+        // Style webcam as floating corner box
+        const webcamCanvas = document.getElementById("webcam-canvas");
+        const webcamPanel = document.querySelector(".panel-webcam");
+        const heading = webcamPanel.querySelector(".panel-heading");
+        const legend = webcamPanel.querySelector(".webcam-legend");
+
+        if (webcamCanvas) webcamCanvas.classList.add("webcam-corner");
+        if (heading) heading.style.display = "none";
+        if (legend) legend.style.display = "none";
+        if (painterCanvas) painterCanvas.style.display = "block";
+        if (painterStartOverlay && !painterStarted) painterStartOverlay.style.display = "flex";
+
+        stopAllSynthNotes();
+        if (player) player.stop();
+        stopExperience();
+        state.trackingEnabled = true;
+        startCamera();
+        
+        populatePainterInputs();
+      } else {
+        // Stop painter loop and stream if active
+        if (painterStarted) {
+          stopPainterAudio();
+        }
+        if (painterCanvas) painterCanvas.style.display = "none";
+        if (painterStartOverlay) painterStartOverlay.style.display = "none";
+        
+        const webcamCanvas = document.getElementById("webcam-canvas");
+        if (webcamCanvas) webcamCanvas.classList.remove("webcam-corner");
+        
+        const webcamPanel = document.querySelector(".panel-webcam");
+        const heading = webcamPanel.querySelector(".panel-heading");
+        const legend = webcamPanel.querySelector(".webcam-legend");
+        if (heading) heading.style.display = "block";
+        if (legend) legend.style.display = "flex";
+
+        if (btnPlayToggle) btnPlayToggle.style.display = "block";
+        if (document.getElementById("btn-instructions")) document.getElementById("btn-instructions").style.display = "block";
+        
+        if (blockPainterInput) blockPainterInput.style.display = "none";
+        if (blockPainterControls) blockPainterControls.style.display = "none";
+        if (blockPainterGuide) blockPainterGuide.style.display = "none";
+      }
+
       if (mode === "conductor") {
         btnModeConductor.classList.add("active");
         btnModeInstrument.classList.remove("active");
+        btnModePainter.classList.remove("active");
         if (headerSongBlock) headerSongBlock.style.display = "flex";
         
         blockLeft.style.display = "flex";
@@ -2803,9 +2965,10 @@
         if (player) player.stop();
         stopExperience();
         
-      } else {
+      } else if (mode === "instrument") {
         btnModeConductor.classList.remove("active");
         btnModeInstrument.classList.add("active");
+        btnModePainter.classList.remove("active");
         if (headerSongBlock) headerSongBlock.style.display = "none";
         
         blockLeft.style.display = "none";
@@ -2883,8 +3046,398 @@
       });
     }
 
+    // ─── STANDALONE MUSIC PAINTER SYSTEM ───
+    let painterStarted = false;
+    let painterStream = null;
+    let painterAudioCtx = null;
+    let painterAnalyser = null;
+    let painterSource = null;
+    let painterAnimId = null;
+    let painterTime = 0;
+    let painterTransientFlash = 0;
+    let painterSmoothEnergy = 0;
+    let painterLastTransientTime = 0;
+    const painterVertexCount = 24;
+    const painterRadii = new Array(painterVertexCount).fill(100);
+    let painterParticles = [];
+
+    const painterCanvas = document.getElementById("painter-canvas");
+    const painterStartOverlay = document.getElementById("painter-start-overlay");
+    const btnPainterStart = document.getElementById("btn-painter-start");
+    const painterErrorMsg = document.getElementById("painter-error-msg");
+    const painterDeviceSelect = document.getElementById("painter-device-select");
+    const painterGainSlider = document.getElementById("painter-gain-slider");
+    const painterGainText = document.getElementById("painter-gain-text");
+    const painterGateSlider = document.getElementById("painter-gate-slider");
+    const painterGateText = document.getElementById("painter-gate-text");
+
+    const blockPainterInput = document.getElementById("cd-block-painter-input");
+    const blockPainterControls = document.getElementById("cd-block-painter-controls");
+    const blockPainterGuide = document.getElementById("cd-block-painter-guide");
+
+    // Populate audio inputs
+    async function populatePainterInputs() {
+      try {
+        await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => {});
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = devices.filter(d => d.kind === "audioinput");
+        
+        if (painterDeviceSelect) {
+          painterDeviceSelect.innerHTML = "";
+          audioInputs.forEach(d => {
+            const opt = document.createElement("option");
+            opt.value = d.deviceId;
+            opt.textContent = d.label || `Entrada ${d.deviceId.slice(0, 5)}...`;
+            painterDeviceSelect.appendChild(opt);
+          });
+          if (audioInputs.length > 0 && !state.painterDeviceId) {
+            state.painterDeviceId = audioInputs[0].deviceId;
+          }
+        }
+      } catch (err) {
+        console.error("Error enumerating standalone inputs:", err);
+      }
+    }
+
+    if (painterDeviceSelect) {
+      painterDeviceSelect.addEventListener("change", (e) => {
+        state.painterDeviceId = e.target.value;
+        if (painterStarted) {
+          startPainterAudio();
+        }
+      });
+    }
+
+    if (painterGainSlider) {
+      painterGainSlider.addEventListener("input", (e) => {
+        state.painterGain = parseFloat(e.target.value);
+        if (painterGainText) painterGainText.textContent = `${state.painterGain.toFixed(1)}x`;
+      });
+    }
+
+    if (painterGateSlider) {
+      painterGateSlider.addEventListener("input", (e) => {
+        state.painterNoiseGate = parseFloat(e.target.value);
+        if (painterGateText) painterGateText.textContent = (state.painterNoiseGate * 1000).toFixed(0);
+        
+        const lvlGate = document.getElementById("painter-level-gate");
+        if (lvlGate) {
+          lvlGate.style.left = `${(state.painterNoiseGate / 0.1) * 100}%`;
+        }
+      });
+    }
+
+    if (btnPainterStart) {
+      btnPainterStart.addEventListener("click", () => {
+        startPainterAudio();
+      });
+    }
+
+    async function startPainterAudio() {
+      try {
+        if (painterErrorMsg) painterErrorMsg.style.display = "none";
+        if (painterStream) {
+          painterStream.getTracks().forEach(t => t.stop());
+        }
+
+        const constraints = {
+          audio: state.painterDeviceId
+            ? { deviceId: { exact: state.painterDeviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+            : { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+        };
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        painterStream = stream;
+
+        if (!painterAudioCtx) {
+          painterAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (painterAudioCtx.state === "suspended") {
+          await painterAudioCtx.resume();
+        }
+
+        if (painterSource) {
+          painterSource.disconnect();
+        }
+
+        painterSource = painterAudioCtx.createMediaStreamSource(stream);
+        painterAnalyser = painterAudioCtx.createAnalyser();
+        painterAnalyser.fftSize = 1024;
+        painterAnalyser.smoothingTimeConstant = 0.4;
+        painterSource.connect(painterAnalyser);
+
+        painterStarted = true;
+        if (painterStartOverlay) painterStartOverlay.style.display = "none";
+        
+        // Initialise radii list based on canvas size
+        const baseRad = Math.min(painterCanvas.width, painterCanvas.height) * 0.16;
+        for (let i = 0; i < painterVertexCount; i++) {
+          painterRadii[i] = baseRad;
+        }
+
+        startPainterLoop();
+      } catch (err) {
+        console.error("Failed to start standalone painter audio:", err);
+        if (painterErrorMsg) {
+          painterErrorMsg.textContent = "⚠️ Error de permisos o dispositivo ocupado.";
+          painterErrorMsg.style.display = "block";
+        }
+      }
+    }
+
+    function stopPainterAudio() {
+      cancelAnimationFrame(painterAnimId);
+      painterAnimId = null;
+      painterStarted = false;
+      if (painterStream) {
+        painterStream.getTracks().forEach(t => t.stop());
+        painterStream = null;
+      }
+      if (painterSource) {
+        painterSource.disconnect();
+        painterSource = null;
+      }
+      if (painterAudioCtx) {
+        painterAudioCtx.close().catch(() => {});
+        painterAudioCtx = null;
+      }
+      if (painterStartOverlay) painterStartOverlay.style.display = "flex";
+    }
+
+    function startPainterLoop() {
+      if (painterAnimId) cancelAnimationFrame(painterAnimId);
+      
+      const bufferLength = 1024;
+      const freqData = new Uint8Array(bufferLength / 2);
+      const timeData = new Uint8Array(bufferLength);
+
+      function loop() {
+        if (!painterStarted) return;
+        painterAnimId = requestAnimationFrame(loop);
+
+        const ctx2d = painterCanvas.getContext("2d");
+        if (!ctx2d) return;
+
+        // Resize if needed
+        const parent = painterCanvas.parentElement;
+        if (parent && (painterCanvas.width !== parent.clientWidth || painterCanvas.height !== parent.clientHeight)) {
+          painterCanvas.width = parent.clientWidth;
+          painterCanvas.height = parent.clientHeight;
+        }
+
+        const w = painterCanvas.width;
+        const h = painterCanvas.height;
+        if (w === 0 || h === 0) return;
+
+        painterTime += 0.015;
+        const time = painterTime;
+
+        // Fading trail background
+        ctx2d.globalCompositeOperation = "source-over";
+        ctx2d.fillStyle = "rgba(0, 0, 0, 0.09)";
+        ctx2d.fillRect(0, 0, w, h);
+
+        let rms = 0;
+        let lowEnd = 0;
+        let midHigh = 0;
+        let isGated = true;
+
+        if (painterAnalyser) {
+          painterAnalyser.getByteFrequencyData(freqData);
+          painterAnalyser.getByteTimeDomainData(timeData);
+
+          let rmsSum = 0;
+          for (let i = 0; i < timeData.length; i++) {
+            const val = (timeData[i] - 128) / 128;
+            rmsSum += val * val;
+          }
+          rms = Math.sqrt(rmsSum / timeData.length);
+
+          const currentGain = state.painterGain;
+          const currentGate = state.painterNoiseGate;
+
+          if (rms * currentGain >= currentGate) {
+            isGated = false;
+
+            let lowSum = 0;
+            const lowBins = 5;
+            for (let i = 1; i <= lowBins; i++) lowSum += freqData[i];
+            lowEnd = (lowSum / lowBins) / 255;
+
+            let midHighSum = 0;
+            let midHighBins = 0;
+            for (let i = 6; i <= 43; i++) {
+              midHighSum += freqData[i];
+              midHighBins++;
+            }
+            midHigh = (midHighSum / midHighBins) / 255;
+
+            // Onset attack detection
+            const currentEnergy = rms * currentGain;
+            const smooth = painterSmoothEnergy;
+            painterSmoothEnergy = smooth * 0.92 + currentEnergy * 0.08;
+
+            const now = performance.now();
+            if (currentEnergy > smooth * 1.45 && currentEnergy > 0.015 && now - painterLastTransientTime > 120) {
+              painterLastTransientTime = now;
+              painterTransientFlash = 1.3;
+
+              // Spawn particles
+              const pCount = 18 + Math.floor(midHigh * 15);
+              const cx = w / 2;
+              const cy = h / 2;
+              const baseRad = Math.min(w, h) * 0.16;
+              const scale = 1.0 + lowEnd * 0.8 + painterTransientFlash * 0.4;
+              const blobRad = baseRad * scale;
+
+              const NEON_PALETTE = ["#00E5FF", "#9D4EDD", "#00F5D4", "#FF007F"];
+
+              for (let k = 0; k < pCount; k++) {
+                const angle = (k / pCount) * Math.PI * 2 + Math.random() * 0.2;
+                const speed = 2.0 + Math.random() * 6.5 + lowEnd * 4.0;
+                painterParticles.push({
+                  x: cx + Math.cos(angle) * blobRad,
+                  y: cy + Math.sin(angle) * blobRad,
+                  vx: Math.cos(angle) * speed,
+                  vy: Math.sin(angle) * speed,
+                  size: 2.0 + Math.random() * 4.0,
+                  color: NEON_PALETTE[Math.floor(Math.random() * NEON_PALETTE.length)],
+                  alpha: 1.0,
+                  decay: 0.012 + Math.random() * 0.018
+                });
+              }
+            }
+          }
+        }
+
+        // Decay flash
+        painterTransientFlash *= 0.94;
+        if (painterTransientFlash < 0.01) painterTransientFlash = 0;
+
+        // Level meter update
+        const lvlBar = document.getElementById("painter-level-bar");
+        const lvlText = document.getElementById("painter-level-text");
+        if (lvlBar) {
+          const percent = Math.min(100, Math.round(rms * state.painterGain * 100));
+          lvlBar.style.width = `${percent}%`;
+          if (lvlText) lvlText.textContent = `${percent}%`;
+        }
+
+        if (isGated) {
+          lowEnd = 0;
+          midHigh = 0;
+          painterSmoothEnergy *= 0.95;
+        }
+
+        // Bioluminescent Ferrofluid blob drawing
+        ctx2d.globalCompositeOperation = "screen";
+
+        const cx = w / 2;
+        const cy = h / 2;
+        const baseRadius = Math.min(w, h) * 0.16;
+        const scale = 1.0 + lowEnd * 0.75 + painterTransientFlash * 0.45;
+
+        const xCoords = [];
+        const yCoords = [];
+
+        for (let i = 0; i < painterVertexCount; i++) {
+          const angle = (i / painterVertexCount) * Math.PI * 2;
+          const wave1 = Math.sin(angle * 3 + time * 3.5) * 35.0 * midHigh;
+          const wave2 = Math.cos(angle * 6 - time * 2.0) * 20.0 * midHigh;
+          const targetRad = baseRadius * scale + wave1 + wave2;
+
+          const diff = targetRad - painterRadii[i];
+          if (diff > 0) {
+            painterRadii[i] = targetRad;
+          } else {
+            painterRadii[i] += diff * 0.07;
+          }
+
+          xCoords.push(cx + Math.cos(angle) * painterRadii[i]);
+          yCoords.push(cy + Math.sin(angle) * painterRadii[i]);
+        }
+
+        // Outline / Layer 1
+        ctx2d.shadowBlur = 30 + midHigh * 60;
+        ctx2d.shadowColor = "#00E5FF";
+        ctx2d.strokeStyle = "rgba(0, 229, 255, 0.45)";
+        ctx2d.lineWidth = 4 + midHigh * 8;
+
+        const drawClosedBlob = () => {
+          ctx2d.beginPath();
+          const startX = (xCoords[0] + xCoords[painterVertexCount - 1]) / 2;
+          const startY = (yCoords[0] + yCoords[painterVertexCount - 1]) / 2;
+          ctx2d.moveTo(startX, startY);
+          for (let i = 0; i < painterVertexCount; i++) {
+            const next = (i + 1) % painterVertexCount;
+            const xc = (xCoords[i] + xCoords[next]) / 2;
+            const yc = (yCoords[i] + yCoords[next]) / 2;
+            ctx2d.quadraticCurveTo(xCoords[i], yCoords[i], xc, yc);
+          }
+          ctx2d.closePath();
+        };
+
+        drawClosedBlob();
+        ctx2d.stroke();
+
+        // Layer 2
+        ctx2d.shadowColor = "#9D4EDD";
+        ctx2d.shadowBlur = 20 + lowEnd * 40;
+        const gradMid = ctx2d.createRadialGradient(cx, cy, baseRadius * 0.2, cx, cy, baseRadius * scale * 1.2);
+        gradMid.addColorStop(0, "rgba(157, 78, 221, 0.25)");
+        gradMid.addColorStop(0.5, "rgba(157, 78, 221, 0.12)");
+        gradMid.addColorStop(1, "rgba(0, 0, 0, 0)");
+        ctx2d.fillStyle = gradMid;
+        drawClosedBlob();
+        ctx2d.fill();
+
+        // Layer 3
+        ctx2d.shadowColor = "#FF007F";
+        ctx2d.shadowBlur = 40 + painterTransientFlash * 40;
+        const gradCore = ctx2d.createRadialGradient(
+          cx + Math.sin(time) * 10, cy + Math.cos(time) * 10, 2,
+          cx, cy, baseRadius * 0.65 * scale
+        );
+        gradCore.addColorStop(0, "rgba(255, 0, 127, 0.8)");
+        gradCore.addColorStop(0.3, "rgba(255, 0, 127, 0.5)");
+        gradCore.addColorStop(0.7, "rgba(157, 78, 221, 0.2)");
+        gradCore.addColorStop(1, "rgba(0, 0, 0, 0)");
+        ctx2d.fillStyle = gradCore;
+        drawClosedBlob();
+        ctx2d.fill();
+
+        // Particles
+        ctx2d.shadowBlur = 12;
+        for (let i = painterParticles.length - 1; i >= 0; i--) {
+          const p = painterParticles[i];
+          p.x += p.vx;
+          p.y += p.vy;
+          p.vx *= 0.97;
+          p.vy *= 0.97;
+          p.alpha -= p.decay;
+
+          if (p.alpha <= 0 || p.size <= 0.1) {
+            painterParticles.splice(i, 1);
+            continue;
+          }
+
+          ctx2d.shadowColor = p.color;
+          ctx2d.fillStyle = p.color;
+          ctx2d.globalAlpha = p.alpha;
+          ctx2d.beginPath();
+          ctx2d.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx2d.fill();
+        }
+
+        ctx2d.globalAlpha = 1.0;
+        ctx2d.shadowBlur = 0;
+      }
+      loop();
+    }
+
     // Cleanup on close
     window.addEventListener("beforeunload", () => {
+      stopPainterAudio();
       stopExperience();
     });
 

@@ -11,6 +11,8 @@ import { useChordSynth, CHROMATIC } from "./hooks/useChordSynth";
 import type { WaveformType } from "./hooks/useChordSynth";
 import InstrumentDashboard from "./components/InstrumentDashboard";
 import ScrollVideoLogo from "./components/ScrollVideoLogo";
+import MusicPainterDashboard from "./components/MusicPainterDashboard";
+import MusicPainterVisualizer from "./components/MusicPainterVisualizer";
 import "./App.css";
 
 // BPM range mapped from hand vertical position
@@ -32,12 +34,17 @@ export default function App() {
   const [showIntro,    setShowIntro]    = useState(true);
 
   // Mode selection & instrument synth configurations
-  const [activeMode, setActiveMode] = useState<"conductor" | "instrument">("conductor");
+  const [activeMode, setActiveMode] = useState<"conductor" | "instrument" | "painter">("conductor");
   const [synthWaveform, setSynthWaveform] = useState<WaveformType>("piano");
   const [synthOctave, setSynthOctave] = useState<number>(4);
   const [snapEnabled, setSnapEnabled] = useState<boolean>(true);
   const [activeNote, setActiveNote] = useState<string | null>(null);
   const [activeQuality, setActiveQuality] = useState<string | null>(null);
+
+  // Painter configuration state
+  const [painterDeviceId, setPainterDeviceId] = useState<string>("");
+  const [painterGain, setPainterGain] = useState<number>(3.0);
+  const [painterNoiseGate, setPainterNoiseGate] = useState<number>(0.015);
 
   // UI display state (throttled ~12 fps)
   const [bpm,           setBpm]           = useState(SONGS[0].bpmBase);
@@ -138,7 +145,7 @@ export default function App() {
 
       smoothActiveNoteRef.current = null;
       smoothActiveQualityRef.current = null;
-    } else {
+    } else if (activeModeRef.current === "instrument") {
       // ── Instrument Mode ──────────────────────────────────────
       let hoveredNote: string | null = null;
       let hoveredQuality: string | null = null;
@@ -216,7 +223,7 @@ export default function App() {
       if (activeModeRef.current === "conductor") {
         setVolume(smoothVolRef.current);
         setBpm(Math.round(smoothBPMRef.current));
-      } else {
+      } else if (activeModeRef.current === "instrument") {
         setActiveNote(smoothActiveNoteRef.current);
         setActiveQuality(smoothActiveQualityRef.current);
       }
@@ -310,12 +317,13 @@ export default function App() {
     setBpm(song.bpmBase);
   }, [engine, activeMode]);
 
-  const handleModeChange = useCallback((mode: "conductor" | "instrument") => {
+  const handleModeChange = useCallback((mode: "conductor" | "instrument" | "painter") => {
     setActiveMode(mode);
     engine.stop();
     stopAll();
     setIsPlaying(false);
-    setTrackingEnabled(false);
+    // Automatically enable webcam tracking in painter mode for corner preview
+    setTrackingEnabled(mode === "painter");
   }, [engine, stopAll]);
 
   return (
@@ -373,6 +381,12 @@ export default function App() {
           >
             🎹 Instrumento
           </button>
+          <button
+            className={`btn-mode-toggle ${activeMode === "painter" ? "active" : ""}`}
+            onClick={() => handleModeChange("painter")}
+          >
+            🎨 Pintar con música
+          </button>
         </div>
 
         {activeMode === "conductor" && (
@@ -400,39 +414,52 @@ export default function App() {
           >
             ← Inicio
           </button>
-          <button
-            id="btn-help"
-            className="btn-primary"
-            style={{
-              marginRight: "10px",
-              background: "rgba(255, 255, 255, 0.08)",
-              color: "var(--text-primary)",
-              border: "1px solid var(--border-glass)",
-            }}
-            onClick={() => setShowHelp(true)}
-          >
-            ❓ Ayuda
-          </button>
-          {isPlaying
-            ? <button id="btn-stop"  className="btn-danger"  onClick={handleStop}>⏹ Detener</button>
-            : <button id="btn-play"  className="btn-primary" onClick={handleStart}>▶ Iniciar</button>}
+          {activeMode !== "painter" && (
+            <>
+              <button
+                id="btn-help"
+                className="btn-primary"
+                style={{
+                  marginRight: "10px",
+                  background: "rgba(255, 255, 255, 0.08)",
+                  color: "var(--text-primary)",
+                  border: "1px solid var(--border-glass)",
+                }}
+                onClick={() => setShowHelp(true)}
+              >
+                ❓ Ayuda
+              </button>
+              {isPlaying
+                ? <button id="btn-stop"  className="btn-danger"  onClick={handleStop}>⏹ Detener</button>
+                : <button id="btn-play"  className="btn-primary" onClick={handleStart}>▶ Iniciar</button>}
+            </>
+          )}
         </div>
       </header>
 
       {/* ── Main ── */}
       <main className="app-main">
-        <section className="panel-webcam">
-          <h2 className="panel-heading">📷 Cámara</h2>
-          <WebcamPreview 
-            videoRef={videoRef} 
-            landmarkerResult={landmarks} 
-            getLevel={engine.getLevel}
-            mode={activeMode}
-            snap={snapEnabled}
-          />
-        </section>
+        <div className="left-panel-container" style={{ position: "relative", flex: 1, height: "100%", overflow: "hidden", display: "flex" }}>
+          {activeMode === "painter" && (
+            <MusicPainterVisualizer
+              deviceId={painterDeviceId}
+              gain={painterGain}
+              noiseGate={painterNoiseGate}
+            />
+          )}
+          <section className={`panel-webcam ${activeMode === "painter" ? "webcam-corner" : ""}`} style={activeMode === "painter" ? { position: "absolute" } : undefined}>
+            <h2 className="panel-heading">📷 Cámara</h2>
+            <WebcamPreview 
+              videoRef={videoRef} 
+              landmarkerResult={landmarks} 
+              getLevel={activeMode === "painter" ? () => 0 : engine.getLevel}
+              mode={activeMode === "painter" ? "conductor" : activeMode}
+              snap={snapEnabled}
+            />
+          </section>
+        </div>
 
-        {activeMode === "conductor" ? (
+        {activeMode === "conductor" && (
           <ConductorDashboard
             songs={SONGS}
             selectedSong={selectedSong}
@@ -444,7 +471,8 @@ export default function App() {
             screenRightDetected={rightDetected}
             vuBarsRef={vuBarsRef}
           />
-        ) : (
+        )}
+        {activeMode === "instrument" && (
           <InstrumentDashboard
             activeNote={activeNote}
             activeQuality={activeQuality}
@@ -457,6 +485,16 @@ export default function App() {
             isPlaying={isPlaying}
             screenLeftDetected={leftDetected}
             screenRightDetected={rightDetected}
+          />
+        )}
+        {activeMode === "painter" && (
+          <MusicPainterDashboard
+            selectedDeviceId={painterDeviceId}
+            onDeviceChange={setPainterDeviceId}
+            gain={painterGain}
+            onGainChange={setPainterGain}
+            noiseGate={painterNoiseGate}
+            onNoiseGateChange={setPainterNoiseGate}
           />
         )}
       </main>
