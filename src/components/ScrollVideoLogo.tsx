@@ -1,15 +1,11 @@
 import React, { useRef, useEffect, useState } from "react";
 
 interface ScrollVideoLogoProps {
-  /**
-   * Set to true if frame 0 is disassembled and the end frame is assembled.
-   * If false, frame 0 is assembled and the end frame is disassembled.
-   * Default is true.
-   */
+  onStart: () => void;
   invertDirection?: boolean;
 }
 
-export default function ScrollVideoLogo({ invertDirection = true }: ScrollVideoLogoProps) {
+export default function ScrollVideoLogo({ onStart, invertDirection = true }: ScrollVideoLogoProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   
@@ -25,22 +21,35 @@ export default function ScrollVideoLogo({ invertDirection = true }: ScrollVideoL
     setVideoDuration(video.duration);
     setIsLoaded(true);
     
-    // Set initial position based on direction
-    if (invertDirection) {
-      video.currentTime = video.duration;
-    } else {
-      video.currentTime = 0;
-    }
+    // Play and immediately pause to ensure the browser initializes the video decoder for seeking
+    video.play().then(() => {
+      video.pause();
+      if (invertDirection) {
+        video.currentTime = video.duration;
+      } else {
+        video.currentTime = 0;
+      }
+    }).catch(err => {
+      console.log("Video auto-play/pause failed:", err);
+      if (invertDirection) {
+        video.currentTime = video.duration;
+      } else {
+        video.currentTime = 0;
+      }
+    });
   };
 
-  // Wheel and Touch Event Listeners bound to window for better accessibility
+  // Wheel and Touch Event Listeners bound to full-screen container
   useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
     // Mouse wheel handler
     const handleWheel = (e: WheelEvent) => {
       // Prevent default page scrolling while interacting with the intro
       e.preventDefault();
       
-      const sensitivity = 0.001; // Adjust scroll speed here
+      const sensitivity = 0.0008; // Adjust scroll speed here
       let newProgress = targetProgress.current + e.deltaY * sensitivity;
       newProgress = Math.max(0, Math.min(1, newProgress));
       
@@ -61,7 +70,7 @@ export default function ScrollVideoLogo({ invertDirection = true }: ScrollVideoL
         const deltaY = touchStartY - currentY; // Positive when swiping up (scrolling down)
         touchStartY = currentY;
         
-        const sensitivity = 0.003; // Touch swipe sensitivity
+        const sensitivity = 0.002; // Touch swipe sensitivity
         let newProgress = targetProgress.current + deltaY * sensitivity;
         newProgress = Math.max(0, Math.min(1, newProgress));
         
@@ -70,15 +79,15 @@ export default function ScrollVideoLogo({ invertDirection = true }: ScrollVideoL
       }
     };
 
-    // Attach listeners to window with passive: false to allow preventDefault
-    window.addEventListener("wheel", handleWheel, { passive: false });
-    window.addEventListener("touchstart", handleTouchStart, { passive: true });
-    window.addEventListener("touchmove", handleTouchMove, { passive: false });
+    // Attach listeners with passive: false to allow preventDefault
+    container.addEventListener("wheel", handleWheel, { passive: false });
+    container.addEventListener("touchstart", handleTouchStart, { passive: true });
+    container.addEventListener("touchmove", handleTouchMove, { passive: false });
 
     return () => {
-      window.removeEventListener("wheel", handleWheel);
-      window.removeEventListener("touchstart", handleTouchStart);
-      window.removeEventListener("touchmove", handleTouchMove);
+      container.removeEventListener("wheel", handleWheel);
+      container.removeEventListener("touchstart", handleTouchStart);
+      container.removeEventListener("touchmove", handleTouchMove);
     };
   }, []);
 
@@ -91,9 +100,9 @@ export default function ScrollVideoLogo({ invertDirection = true }: ScrollVideoL
       if (video && video.duration && !isNaN(video.duration)) {
         const diff = targetProgress.current - currentProgress.current;
         
-        // Only seek if there is a meaningful difference to avoid CPU overhead
-        if (Math.abs(diff) > 0.001) {
-          const lerpFactor = 0.15; // Smooth interpolation speed (0.1 = slow/smooth, 0.3 = fast)
+        // Lowered threshold to 0.0001 so small scroll increments are not ignored
+        if (Math.abs(diff) > 0.0001) {
+          const lerpFactor = 0.12; // Slightly slower for buttery smooth cinematic motion
           currentProgress.current += diff * lerpFactor;
           
           // Clamp current progress
@@ -104,8 +113,8 @@ export default function ScrollVideoLogo({ invertDirection = true }: ScrollVideoL
             ? (1 - currentProgress.current) * video.duration
             : currentProgress.current * video.duration;
             
-          // Set video time (safety bounds: 0 to duration - 0.05s to prevent overshoot)
-          video.currentTime = Math.max(0, Math.min(video.duration - 0.05, mappedTime));
+          // Set video time (safety bounds: 0 to duration - 0.04s)
+          video.currentTime = Math.max(0, Math.min(video.duration - 0.04, mappedTime));
           setProgressState(currentProgress.current);
         }
       }
@@ -122,19 +131,16 @@ export default function ScrollVideoLogo({ invertDirection = true }: ScrollVideoL
       ref={containerRef}
       className="scroll-video-logo-container"
       style={{
-        position: "relative",
-        width: "280px",
-        height: "280px",
-        margin: "0 auto 20px auto",
+        position: "absolute",
+        inset: 0,
+        width: "100%",
+        height: "100%",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         cursor: "ns-resize",
-        borderRadius: "50%",
-        background: "rgba(255, 255, 255, 0.02)",
-        border: "1px solid rgba(255, 255, 255, 0.05)",
-        boxShadow: "inset 0 0 20px rgba(116, 172, 223, 0.1), 0 0 30px rgba(0, 0, 0, 0.2)",
-        overflow: "hidden"
+        overflow: "hidden",
+        background: "#000"
       }}
     >
       <video
@@ -145,67 +151,124 @@ export default function ScrollVideoLogo({ invertDirection = true }: ScrollVideoL
         preload="auto"
         onLoadedMetadata={handleLoadedMetadata}
         style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
           width: "100%",
           height: "100%",
-          objectFit: "contain",
+          objectFit: "cover",
+          objectPosition: "center",
           pointerEvents: "none", // Prevent native video controls or clicks
           opacity: isLoaded ? 1 : 0,
-          transition: "opacity 0.5s ease"
+          transition: "opacity 0.8s ease"
         }}
       />
 
       {!isLoaded && (
-        <div style={{ position: "absolute", color: "var(--text-muted)", fontSize: "14px" }}>
-          Cargando escudo...
+        <div style={{ position: "absolute", color: "var(--text-muted)", fontSize: "16px", zIndex: 10 }}>
+          Cargando visual...
         </div>
       )}
 
       {isLoaded && (
-        <div
-          className="scroll-prompt-indicator"
-          style={{
-            position: "absolute",
-            bottom: "16px",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "4px",
-            opacity: progressState < 0.1 ? 1 - (progressState * 10) : 0,
-            pointerEvents: "none",
-            transition: "opacity 0.2s ease",
-            color: "var(--cyan)",
-            textShadow: "0 0 8px rgba(0, 242, 254, 0.6)"
-          }}
-        >
-          {/* Animated mouse icon */}
+        <>
+          {/* Subtle vignette/radial gradient to enhance contrast */}
           <div 
-            className="mouse-icon"
             style={{
-              width: "14px",
-              height: "24px",
-              border: "1.5px solid var(--cyan)",
-              borderRadius: "8px",
-              position: "relative",
+              position: "absolute",
+              inset: 0,
+              background: "radial-gradient(circle, rgba(0,0,0,0) 40%, rgba(0,0,0,0.6) 100%)",
+              pointerEvents: "none",
+              zIndex: 1
+            }}
+          />
+
+          {/* Mouse Scroll Indicator (Bottom Center) */}
+          <div
+            className="scroll-prompt-indicator"
+            style={{
+              position: "absolute",
+              bottom: "40px",
+              left: "50%",
+              transform: "translateX(-50%)",
               display: "flex",
-              justifyContent: "center"
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "6px",
+              opacity: progressState < 0.15 ? 1 - (progressState * 6.6) : 0,
+              pointerEvents: "none",
+              transition: "opacity 0.3s ease",
+              color: "var(--cyan)",
+              textShadow: "0 0 10px rgba(0, 242, 254, 0.8)",
+              zIndex: 5
             }}
           >
+            {/* Animated mouse icon */}
             <div 
-              className="mouse-dot"
+              className="mouse-icon"
               style={{
-                width: "3px",
-                height: "5px",
-                background: "var(--cyan)",
-                borderRadius: "50%",
-                marginTop: "4px",
-                animation: "mouse-wheel-scroll 1.5s infinite"
+                width: "16px",
+                height: "26px",
+                border: "2px solid var(--cyan)",
+                borderRadius: "10px",
+                position: "relative",
+                display: "flex",
+                justifyContent: "center"
               }}
-            />
+            >
+              <div 
+                className="mouse-dot"
+                style={{
+                  width: "4px",
+                  height: "6px",
+                  background: "var(--cyan)",
+                  borderRadius: "50%",
+                  marginTop: "4px",
+                  animation: "mouse-wheel-scroll 1.5s infinite"
+                }}
+              />
+            </div>
+            <span style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase" }}>
+              Desplaza para desarmar
+            </span>
           </div>
-          <span style={{ fontSize: "10px", fontWeight: 600, letterSpacing: "1px", textTransform: "uppercase" }}>
-            Scroll para desarmar
-          </span>
-        </div>
+
+          {/* Comenzar button in bottom right corner */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onStart();
+            }}
+            style={{
+              position: "absolute",
+              bottom: "40px",
+              right: "40px",
+              zIndex: 10,
+              background: "linear-gradient(135deg, var(--cyan), var(--purple))",
+              color: "#fff",
+              border: "none",
+              padding: "16px 36px",
+              fontSize: "15px",
+              fontWeight: 700,
+              borderRadius: "30px",
+              cursor: "pointer",
+              boxShadow: "0 0 20px rgba(0, 242, 254, 0.4), 0 0 40px rgba(157, 78, 221, 0.2)",
+              transition: "all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)",
+              letterSpacing: "1px",
+              textTransform: "uppercase"
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = "translateY(-3px) scale(1.05)";
+              e.currentTarget.style.boxShadow = "0 0 30px rgba(0, 242, 254, 0.6), 0 0 50px rgba(157, 78, 221, 0.4)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = "none";
+              e.currentTarget.style.boxShadow = "0 0 20px rgba(0, 242, 254, 0.4), 0 0 40px rgba(157, 78, 221, 0.2)";
+            }}
+          >
+            Comenzar
+          </button>
+        </>
       )}
     </div>
   );

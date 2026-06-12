@@ -305,36 +305,8 @@ export default function App() {
 
       {/* ── Intro ── */}
       {showIntro && (
-        <div className="intro-overlay">
-          <div className="intro-card">
-            <ScrollVideoLogo />
-            <h1 className="intro-title">Web Conductor</h1>
-            <p className="intro-subtitle">Dirige la música o toca acordes con el movimiento de tus manos</p>
-            <ul className="intro-features">
-              <li>
-                <span>🎼</span>
-                <div>
-                  <strong>Modo Conductor</strong><br />
-                  Mano izq = volumen · Mano der = tempo/velocidad.
-                </div>
-              </li>
-              <li>
-                <span>🎹</span>
-                <div>
-                  <strong>Modo Instrumento</strong><br />
-                  Mano izq = Nota base (rueda) · Mano der = Acorde (rueda).
-                </div>
-              </li>
-            </ul>
-            <p className="intro-note">Se solicitará acceso a tu cámara</p>
-            <button
-              id="btn-start-conductor"
-              className="btn-primary btn-large"
-              onClick={handleStart}
-            >
-              <span>🇦🇷</span> Iniciar Experiencia
-            </button>
-          </div>
+        <div className="intro-overlay" style={{ padding: 0 }}>
+          <ScrollVideoLogo onStart={handleStart} />
         </div>
       )}
 
