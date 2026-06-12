@@ -1404,6 +1404,13 @@ button {
   margin-bottom: 24px;
 }
 
+@keyframes mouse-wheel-scroll {
+  0% { opacity: 0; transform: translateY(0); }
+  20% { opacity: 1; }
+  80% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 0; }
+}
+
 /* ─────────────────────────────────────────────────────────
    RESPONSIVE
 ───────────────────────────────────────────────────────── */

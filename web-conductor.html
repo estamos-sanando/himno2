@@ -579,6 +579,76 @@
       box-shadow: var(--shadow-card);
     }
 
+    .scroll-video-logo-container {
+      position: relative;
+      width: 280px;
+      height: 280px;
+      margin: 0 auto 20px auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: ns-resize;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      box-shadow: inset 0 0 20px rgba(116, 172, 223, 0.1), 0 0 30px rgba(0, 0, 0, 0.2);
+      overflow: hidden;
+    }
+
+    .scroll-video-logo-container video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.5s ease;
+    }
+
+    .scroll-video-logo-container.loaded video {
+      opacity: 1;
+    }
+
+    .scroll-prompt-indicator {
+      position: absolute;
+      bottom: 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+      color: var(--cyan);
+      text-shadow: 0 0 8px rgba(0, 242, 254, 0.6);
+    }
+
+    .mouse-icon {
+      width: 14px;
+      height: 24px;
+      border: 1.5px solid var(--cyan);
+      border-radius: 8px;
+      position: relative;
+      display: flex;
+      justify-content: center;
+    }
+
+    .mouse-dot {
+      width: 3px;
+      height: 5px;
+      background: var(--cyan);
+      border-radius: 50%;
+      margin-top: 4px;
+      animation: mouse-wheel-scroll 1.5s infinite;
+    }
+
+    @keyframes mouse-wheel-scroll {
+      0% { opacity: 0; transform: translateY(0); }
+      20% { opacity: 1; }
+      80% { opacity: 0; transform: translateY(8px); }
+      100% { opacity: 0; }
+    }
+
+
+
     .intro-logo {
       font-size: 48px;
       margin-bottom: 16px;
@@ -791,7 +861,15 @@
     <!-- Intro Card -->
     <div id="intro-overlay" class="intro-overlay">
       <div class="intro-card">
-        <img src="escudo-argentino.png" alt="Escudo Nacional Argentino" style="width: 120px; height: auto; margin-bottom: 20px; filter: drop-shadow(0 0 12px rgba(116, 172, 223, 0.4)); display: block; margin-left: auto; margin-right: auto;">
+        <div id="scroll-video-container" class="scroll-video-logo-container">
+          <video id="scroll-video-logo" src="logo.mp4" muted playsinline preload="auto"></video>
+          <div id="scroll-prompt" class="scroll-prompt-indicator">
+            <div class="mouse-icon">
+              <div class="mouse-dot"></div>
+            </div>
+            <span style="font-size: 10px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;">Scroll para desarmar</span>
+          </div>
+        </div>
         <h1 class="intro-title">Web Conductor</h1>
         <p class="intro-subtitle">Dirige la orquesta con los gestos de tus manos en tiempo real</p>
         
@@ -1089,6 +1167,95 @@
     const introOverlay = document.getElementById("intro-overlay");
     const btnStartIntro = document.getElementById("btn-start-intro");
     const btnPlayToggle = document.getElementById("btn-play-toggle");
+
+    // ── SCROLL-DRIVEN VIDEO LOGO SYSTEM ──
+    const scrollVideoContainer = document.getElementById("scroll-video-container");
+    const scrollVideoLogo = document.getElementById("scroll-video-logo");
+    const scrollPrompt = document.getElementById("scroll-prompt");
+
+    let targetProgress = 0;
+    let currentProgress = 0;
+    let videoDuration = 0;
+    const invertScrollDirection = true; // Shield starts assembled, disassembles on scroll
+
+    if (scrollVideoLogo) {
+      scrollVideoLogo.addEventListener("loadedmetadata", () => {
+        videoDuration = scrollVideoLogo.duration;
+        if (scrollVideoContainer) {
+          scrollVideoContainer.classList.add("loaded");
+        }
+        if (invertScrollDirection) {
+          scrollVideoLogo.currentTime = videoDuration;
+        } else {
+          scrollVideoLogo.currentTime = 0;
+        }
+      });
+      
+      // Safety load if metadata was cached
+      if (scrollVideoLogo.readyState >= 1) {
+        videoDuration = scrollVideoLogo.duration;
+        if (scrollVideoContainer) {
+          scrollVideoContainer.classList.add("loaded");
+        }
+      }
+
+      if (introOverlay) {
+        introOverlay.addEventListener("wheel", (e) => {
+          if (introOverlay.style.display !== "none") {
+            e.preventDefault();
+            const sensitivity = 0.001;
+            targetProgress += e.deltaY * sensitivity;
+            targetProgress = Math.max(0, Math.min(1, targetProgress));
+          }
+        }, { passive: false });
+        
+        let touchStartY = 0;
+        introOverlay.addEventListener("touchstart", (e) => {
+          if (e.touches.length === 1) {
+            touchStartY = e.touches[0].clientY;
+          }
+        }, { passive: true });
+        
+        introOverlay.addEventListener("touchmove", (e) => {
+          if (introOverlay.style.display !== "none" && e.touches.length === 1) {
+            const currentY = e.touches[0].clientY;
+            const deltaY = touchStartY - currentY;
+            touchStartY = currentY;
+            const sensitivity = 0.003;
+            targetProgress += deltaY * sensitivity;
+            targetProgress = Math.max(0, Math.min(1, targetProgress));
+            e.preventDefault();
+          }
+        }, { passive: false });
+      }
+
+      function updateScrollVideo() {
+        if (videoDuration && !isNaN(videoDuration)) {
+          const diff = targetProgress - currentProgress;
+          if (Math.abs(diff) > 0.0001) {
+            const lerpFactor = 0.15;
+            currentProgress += diff * lerpFactor;
+            currentProgress = Math.max(0, Math.min(1, currentProgress));
+            
+            const mappedTime = invertScrollDirection
+              ? (1 - currentProgress) * videoDuration
+              : currentProgress * videoDuration;
+              
+            scrollVideoLogo.currentTime = Math.max(0, Math.min(videoDuration - 0.05, mappedTime));
+            
+            if (scrollPrompt) {
+              if (currentProgress < 0.1) {
+                scrollPrompt.style.opacity = 1 - (currentProgress * 10);
+              } else {
+                scrollPrompt.style.opacity = 0;
+              }
+            }
+          }
+        }
+        requestAnimationFrame(updateScrollVideo);
+      }
+      requestAnimationFrame(updateScrollVideo);
+    }
     
     const webcamVideo = document.getElementById("webcam-video");
     const webcamCanvas = document.getElementById("webcam-canvas");

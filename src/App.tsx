@@ -10,6 +10,7 @@ import ConductorDashboard from "./components/ConductorDashboard";
 import { useChordSynth, CHROMATIC } from "./hooks/useChordSynth";
 import type { WaveformType } from "./hooks/useChordSynth";
 import InstrumentDashboard from "./components/InstrumentDashboard";
+import ScrollVideoLogo from "./components/ScrollVideoLogo";
 import "./App.css";
 
 // BPM range mapped from hand vertical position
@@ -306,16 +307,7 @@ export default function App() {
       {showIntro && (
         <div className="intro-overlay">
           <div className="intro-card">
-            <img
-              src="/escudo-argentino.png"
-              alt="Escudo Nacional Argentino"
-              style={{
-                width: "120px",
-                height: "auto",
-                marginBottom: "20px",
-                filter: "drop-shadow(0 0 12px rgba(116, 172, 223, 0.4))"
-              }}
-            />
+            <ScrollVideoLogo />
             <h1 className="intro-title">Web Conductor</h1>
             <p className="intro-subtitle">Dirige la música o toca acordes con el movimiento de tus manos</p>
             <ul className="intro-features">
