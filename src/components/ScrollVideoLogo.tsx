@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useCallback } from "react";
 
 interface ScrollVideoLogoProps {
   onStart: () => void;
@@ -19,7 +19,19 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
   const entered     = useRef(false);
   const durRef      = useRef(0);
   const videoLoaded = useRef(false);
+  const videoErrored = useRef(false);
   const keysPressed = useRef<{ [key: string]: boolean }>({});
+
+  const revealVideo = useCallback(() => {
+    if (videoErrored.current) return;
+    videoLoaded.current = true;
+    if (videoRef.current && videoRef.current.style) {
+      videoRef.current.style.opacity = "1";
+    }
+    if (imgRef.current && imgRef.current.style) {
+      imgRef.current.style.opacity = "0";
+    }
+  }, []);
 
   // ── IMAGE + VIDEO INIT ───────────────────────────────────────────────────
   useEffect(() => {
@@ -42,19 +54,20 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
       if (!dur || isNaN(dur)) return;
       durRef.current = dur;
       const initT = INVERT ? Math.max(0.01, dur - 0.08) : 0.02;
-      // Reveal video once the frame is decoded
-      const onSeeked = () => {
-        videoLoaded.current = true;
-        if (video.style) video.style.opacity = "1";
-        if (imgRef.current) imgRef.current.style.opacity = "0";
-      };
-      video.addEventListener("seeked", onSeeked, { once: true });
+      video.addEventListener("seeked", revealVideo, { once: true });
       video.currentTime = initT;
       lastSeekT.current = initT;
     };
 
+    const onError = () => {
+      videoErrored.current = true;
+      console.warn("SVL: video failed, using static image");
+    };
+
     video.addEventListener("loadeddata",     setupVideo, { once: true });
     video.addEventListener("loadedmetadata", setupVideo, { once: true });
+    video.addEventListener("error",          onError);
+    
     if (video.readyState >= 2) setupVideo();
     else if (video.readyState >= 1) setupVideo();
 
@@ -63,8 +76,9 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
       clearTimeout(promptTimer);
       video.removeEventListener("loadeddata",     setupVideo);
       video.removeEventListener("loadedmetadata", setupVideo);
+      video.removeEventListener("error",          onError);
     };
-  }, []);
+  }, [revealVideo]);
 
   // ── KEYBOARD LISTENERS ───────────────────────────────────────────────────
   useEffect(() => {
@@ -96,6 +110,7 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
     const prime = () => {
       if (primed) return;
       primed = true;
+      revealVideo();
       const v = videoRef.current;
       if (v && durRef.current) {
         v.play().then(() => setTimeout(() => v.pause(), 40)).catch(() => {});

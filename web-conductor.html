@@ -1200,6 +1200,7 @@
     let svlLastSeek = -1;
     let svlEntered  = false;
     let svlVideoLoaded = false;
+    let svlVideoErrored = false;
     const svlKeysPressed = {};
 
     // Show the static shield image immediately as fallback
@@ -1218,7 +1219,7 @@
     }
 
     function svlRevealVideo() {
-      if (!svlVideo) return;
+      if (!svlVideo || svlVideoErrored) return;
       svlVideoLoaded = true;
       svlVideo.style.opacity = "1"; // video fades in over the shield image
       if (svlImg) svlImg.style.opacity = "0"; // hide fallback image to prevent double rendering
@@ -1238,6 +1239,7 @@
       svlVideo.addEventListener("loadeddata",     svlSetFrame, { once: true });
       svlVideo.addEventListener("loadedmetadata", svlSetFrame, { once: true });
       svlVideo.addEventListener("error", () => {
+        svlVideoErrored = true;
         // Video failed — keep the static image, that's fine
         console.warn("SVL: video failed, using static image");
       });
@@ -1263,6 +1265,7 @@
     function svlPrime() {
       if (svlPrimed || !svlVideo) return;
       svlPrimed = true;
+      svlRevealVideo();
       svlVideo.play().then(() => {
         setTimeout(() => svlVideo.pause(), 40);
       }).catch(() => {});
