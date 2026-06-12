@@ -7,12 +7,12 @@ interface MusicPainterVisualizerProps {
   filter: boolean;
 }
 
-// Neon color palette
+// Neon color palette (themed around Argentina flag + neon highlights)
 const NEON_PALETTE = [
-  "#00E5FF", // Electric Blue
-  "#9D4EDD", // Amethyst Violet
-  "#00F5D4", // Emerald Green
-  "#FF007F", // Neon Magenta
+  "#74ACDF", // Celestial Blue
+  "#FFFFFF", // Pure White
+  "#F6B800", // Mayo Sun Gold
+  "#00E5FF", // Electric Cyan
 ];
 
 interface Particle {
@@ -24,6 +24,7 @@ interface Particle {
   color: string;
   alpha: number;
   decay: number;
+  gravity?: number;
 }
 
 export default function MusicPainterVisualizer({
@@ -292,7 +293,7 @@ export default function MusicPainterVisualizer({
             lastTransientTimeRef.current = now;
             transientFlashRef.current = 1.3; // Trigger attack flash
 
-            // Spawn radial burst particles
+            // Spawn radial burst particles (Central explosion)
             const pCount = 18 + Math.floor(midHigh * 15);
             const cx = w / 2;
             const cy = h / 2;
@@ -302,7 +303,7 @@ export default function MusicPainterVisualizer({
 
             for (let k = 0; k < pCount; k++) {
               const angle = (k / pCount) * Math.PI * 2 + Math.random() * 0.2;
-              const speed = 2.0 + Math.random() * 6.5 + lowEnd * 4.0;
+              const speed = 3.0 + Math.random() * 8.0 + lowEnd * 5.0;
               const px = cx + Math.cos(angle) * blobRad;
               const py = cy + Math.sin(angle) * blobRad;
 
@@ -314,13 +315,39 @@ export default function MusicPainterVisualizer({
                 size: 2.0 + Math.random() * 4.0,
                 color: NEON_PALETTE[Math.floor(Math.random() * NEON_PALETTE.length)],
                 alpha: 1.0,
-                decay: 0.010 + Math.random() * 0.015, // slightly slower fade
+                decay: 0.010 + Math.random() * 0.018, // slightly slower fade
+                gravity: 0.15, // Gravitational downward fall
               });
             }
 
+            // Spawn secondary background sky firework explosion (65% chance)
+            if (Math.random() < 0.65) {
+              const fX = w * (0.15 + Math.random() * 0.7);
+              const fY = h * (0.15 + Math.random() * 0.35);
+              const fireworkColors = ["#74ACDF", "#FFFFFF", "#F6B800"];
+              const fwColor = fireworkColors[Math.floor(Math.random() * fireworkColors.length)];
+              const fwCount = 12 + Math.floor(Math.random() * 15);
+              
+              for (let k = 0; k < fwCount; k++) {
+                const angle = (k / fwCount) * Math.PI * 2 + Math.random() * 0.3;
+                const speed = 1.5 + Math.random() * 5.0;
+                particlesRef.current.push({
+                  x: fX,
+                  y: fY,
+                  vx: Math.cos(angle) * speed,
+                  vy: Math.sin(angle) * speed,
+                  size: 1.5 + Math.random() * 3.0,
+                  color: Math.random() < 0.3 ? "#FFFFFF" : fwColor,
+                  alpha: 1.0,
+                  decay: 0.008 + Math.random() * 0.014,
+                  gravity: 0.12, // Gravity for firework sparks
+                });
+              }
+            }
+
             // Cap maximum active particles to prevent GC/rendering bottleneck
-            if (particlesRef.current.length > 200) {
-              particlesRef.current.splice(0, particlesRef.current.length - 200);
+            if (particlesRef.current.length > 300) {
+              particlesRef.current.splice(0, particlesRef.current.length - 300);
             }
           }
         }
@@ -346,13 +373,35 @@ export default function MusicPainterVisualizer({
         smoothEnergyRef.current = smoothEnergyRef.current * 0.95;
       }
 
-      // Draw bioluminescent fluids using screen additive blend
+      // Draw background flag ribbons & bioluminescent fluids using screen additive blend
       ctx2d.globalCompositeOperation = "screen";
 
       const cx = w / 2;
       const cy = h / 2;
       const baseRadius = Math.min(w, h) * 0.16;
       const scale = 1.0 + lowEnd * 0.75 + transientFlashRef.current * 0.45;
+
+      // Helper function to draw wavy horizontal flag ribbons
+      const drawFlagRibbon = (yCenter: number, height: number, color: string) => {
+        ctx2d.beginPath();
+        for (let x = 0; x <= w; x += 15) {
+          const wave = Math.sin(x * 0.004 + time * 1.5) * (15.0 + lowEnd * 35.0) +
+                       Math.cos(x * 0.008 - time * 0.8) * (8.0 + lowEnd * 15.0);
+          const y = yCenter + wave;
+          if (x === 0) ctx2d.moveTo(x, y);
+          else ctx2d.lineTo(x, y);
+        }
+        ctx2d.strokeStyle = color;
+        ctx2d.lineWidth = height;
+        ctx2d.lineCap = "round";
+        ctx2d.stroke();
+      };
+
+      // Draw background Argentine flag waving stripes
+      const ribbonHeight = 35 + lowEnd * 25;
+      drawFlagRibbon(h * 0.5 - ribbonHeight, ribbonHeight, "rgba(116, 172, 223, 0.11)"); // Celestial Blue
+      drawFlagRibbon(h * 0.5, ribbonHeight, "rgba(255, 255, 255, 0.11)");               // White
+      drawFlagRibbon(h * 0.5 + ribbonHeight, ribbonHeight, "rgba(116, 172, 223, 0.11)"); // Celestial Blue
 
       // Read/write preallocated coordinates (avoids GC allocations)
       const xCoords = xCoordsRef.current;
@@ -361,10 +410,14 @@ export default function MusicPainterVisualizer({
       for (let i = 0; i < vertexCount; i++) {
         const angle = (i / vertexCount) * Math.PI * 2;
         
-        // Form complex geometric ripples
-        const wave1 = Math.sin(angle * 4 + time * 4.0) * 40.0 * midHigh;
-        const wave2 = Math.cos(angle * 8 - time * 2.5) * 22.0 * midHigh;
-        const targetRadius = baseRadius * scale + wave1 + wave2;
+        // Flower petal formula: forms 8 symmetric petals that "bloom" with sound
+        const petals = 8;
+        const petalAmp = (baseRadius * 0.35) * (0.2 + midHigh * 1.5);
+        const flowerWave = Math.sin(angle * petals + time * 0.5) * petalAmp;
+        
+        // Secondary ripples
+        const ripple = Math.cos(angle * 16 - time * 3.0) * 8.0 * midHigh;
+        const targetRadius = baseRadius * scale + flowerWave + ripple;
 
         // Transitions: instant expansion, smooth decay contraction
         const diff = targetRadius - radii[i];
@@ -394,7 +447,7 @@ export default function MusicPainterVisualizer({
       };
 
       // 1. Decorative Outer Star/Plasma Ring (Dashed, rotating slowly)
-      ctx2d.strokeStyle = "rgba(157, 78, 221, 0.18)";
+      ctx2d.strokeStyle = "rgba(116, 172, 223, 0.18)"; // Celestial Blue instead of Violet
       ctx2d.lineWidth = 1.5;
       ctx2d.setLineDash([4, 12]);
       ctx2d.beginPath();
@@ -402,20 +455,19 @@ export default function MusicPainterVisualizer({
       ctx2d.stroke();
       ctx2d.setLineDash([]); // Reset dash
 
-      // 2. Layer 1: Glowing Cyan Outline (No shadowBlur for 60fps hardware acceleration!)
-      // Layered stroke widths and translucent opacities create a highly realistic glow
+      // 2. Layer 1: Glowing Outline (Patriotic Celestial Blue)
       traceClosedBlob();
-      ctx2d.shadowBlur = 0; // Disable heavy shadowBlur
+      ctx2d.shadowBlur = 0; // Disable heavy shadowBlur for 60fps
 
-      ctx2d.strokeStyle = "rgba(0, 229, 255, 0.06)";
+      ctx2d.strokeStyle = "rgba(116, 172, 223, 0.08)";
       ctx2d.lineWidth = 32 + midHigh * 30;
       ctx2d.stroke();
 
-      ctx2d.strokeStyle = "rgba(0, 229, 255, 0.15)";
+      ctx2d.strokeStyle = "rgba(116, 172, 223, 0.2)";
       ctx2d.lineWidth = 16 + midHigh * 15;
       ctx2d.stroke();
 
-      ctx2d.strokeStyle = "rgba(0, 229, 255, 0.45)";
+      ctx2d.strokeStyle = "rgba(116, 172, 223, 0.5)";
       ctx2d.lineWidth = 6 + midHigh * 6;
       ctx2d.stroke();
 
@@ -423,30 +475,87 @@ export default function MusicPainterVisualizer({
       ctx2d.lineWidth = 1.5;
       ctx2d.stroke();
 
-      // 3. Layer 2: Mid-range Violet Fluid (Translucent gradient fill)
+      // 3. Layer 2: Mid-range White/Celestial Fluid (Translucent gradient fill)
       const gradMid = ctx2d.createRadialGradient(cx, cy, baseRadius * 0.2, cx, cy, baseRadius * scale * 1.25);
-      gradMid.addColorStop(0, "rgba(157, 78, 221, 0.25)");
-      gradMid.addColorStop(0.5, "rgba(157, 78, 221, 0.12)");
+      gradMid.addColorStop(0, "rgba(255, 255, 255, 0.25)");
+      gradMid.addColorStop(0.5, "rgba(116, 172, 223, 0.12)");
       gradMid.addColorStop(1, "rgba(0, 0, 0, 0)");
       ctx2d.fillStyle = gradMid;
       traceClosedBlob();
       ctx2d.fill();
 
-      // 4. Layer 3: Inner Magenta Core (Hot bioluminescent core)
+      // 4. Layer 3: Inner Sun-Gold Core
       const gradCore = ctx2d.createRadialGradient(
         cx + Math.sin(time) * 8, cy + Math.cos(time) * 8, 2,
         cx, cy, baseRadius * 0.68 * scale
       );
-      gradCore.addColorStop(0, "rgba(255, 0, 127, 0.82)");
-      gradCore.addColorStop(0.35, "rgba(255, 0, 127, 0.45)");
-      gradCore.addColorStop(0.7, "rgba(157, 78, 221, 0.15)");
+      gradCore.addColorStop(0, "rgba(246, 184, 0, 0.85)"); // Mayo Sun Gold
+      gradCore.addColorStop(0.35, "rgba(255, 255, 255, 0.5)"); // White
+      gradCore.addColorStop(0.7, "rgba(116, 172, 223, 0.18)"); // Celestial Blue
       gradCore.addColorStop(1, "rgba(0, 0, 0, 0)");
       ctx2d.fillStyle = gradCore;
       traceClosedBlob();
       ctx2d.fill();
 
-      // 5. Draw small glowing nodes at every 2nd vertex (adds structure and high visual feedback)
-      ctx2d.fillStyle = "#00F5D4";
+      // 4.5. Sol de Mayo in the Center
+      const sunRadius = 22 + lowEnd * 12;
+      const rayCount = 16;
+      const innerSunRad = sunRadius * 0.5;
+
+      // Sun glow
+      const sunGlow = ctx2d.createRadialGradient(cx, cy, innerSunRad, cx, cy, sunRadius * 2.5);
+      sunGlow.addColorStop(0, "rgba(246, 184, 0, 0.8)");
+      sunGlow.addColorStop(0.3, "rgba(246, 184, 0, 0.3)");
+      sunGlow.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx2d.fillStyle = sunGlow;
+      ctx2d.beginPath();
+      ctx2d.arc(cx, cy, sunRadius * 2.5, 0, Math.PI * 2);
+      ctx2d.fill();
+
+      // Sun disk
+      ctx2d.fillStyle = "#F6B800";
+      ctx2d.beginPath();
+      ctx2d.arc(cx, cy, sunRadius, 0, Math.PI * 2);
+      ctx2d.fill();
+
+      // Rotating Sun Rays (Alternating straight and wavy rays)
+      ctx2d.strokeStyle = "#F6B800";
+      ctx2d.lineWidth = 1.8 + lowEnd * 1.5;
+      for (let r = 0; r < rayCount; r++) {
+        const angle = (r / rayCount) * Math.PI * 2 + time * 0.3; // Rotate slowly
+        const isWavy = r % 2 === 0;
+        
+        const startX = cx + Math.cos(angle) * sunRadius;
+        const startY = cy + Math.sin(angle) * sunRadius;
+        
+        const rayLength = sunRadius * (1.2 + midHigh * 1.5);
+        const endX = cx + Math.cos(angle) * rayLength;
+        const endY = cy + Math.sin(angle) * rayLength;
+        
+        if (isWavy) {
+          ctx2d.beginPath();
+          ctx2d.moveTo(startX, startY);
+          const steps = 10;
+          for (let s = 1; s <= steps; s++) {
+            const tSeg = s / steps;
+            const dist = sunRadius + (rayLength - sunRadius) * tSeg;
+            const waveOffset = Math.sin(tSeg * Math.PI * 3 + time * 5) * (4 + midHigh * 6);
+            
+            const px = cx + Math.cos(angle) * dist + Math.cos(angle + Math.PI/2) * waveOffset;
+            const py = cy + Math.sin(angle) * dist + Math.sin(angle + Math.PI/2) * waveOffset;
+            ctx2d.lineTo(px, py);
+          }
+          ctx2d.stroke();
+        } else {
+          ctx2d.beginPath();
+          ctx2d.moveTo(startX, startY);
+          ctx2d.lineTo(endX, endY);
+          ctx2d.stroke();
+        }
+      }
+
+      // 5. Draw small glowing nodes at every 2nd vertex (Dorado)
+      ctx2d.fillStyle = "#F6B800";
       const nodeSize = 2.5 + midHigh * 4.5;
       for (let i = 0; i < vertexCount; i++) {
         if (i % 2 === 0) {
@@ -456,14 +565,20 @@ export default function MusicPainterVisualizer({
         }
       }
 
-      // 6. Draw & Update Particles
+      // 6. Draw & Update Particles (Fireworks with gravity and motion trails)
       const particles = particlesRef.current;
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
+        const prevX = p.x;
+        const prevY = p.y;
+
         p.x += p.vx;
         p.y += p.vy;
-        p.vx *= 0.975;
-        p.vy *= 0.975;
+        if (p.gravity) {
+          p.vy += p.gravity;
+        }
+        p.vx *= 0.98;
+        p.vy *= 0.98;
         p.alpha -= p.decay;
 
         if (p.alpha <= 0 || p.size <= 0.1) {
@@ -471,11 +586,14 @@ export default function MusicPainterVisualizer({
           continue;
         }
 
-        ctx2d.fillStyle = p.color;
+        ctx2d.strokeStyle = p.color;
         ctx2d.globalAlpha = p.alpha;
+        ctx2d.lineWidth = p.size;
+        ctx2d.lineCap = "round";
         ctx2d.beginPath();
-        ctx2d.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx2d.fill();
+        ctx2d.moveTo(prevX, prevY);
+        ctx2d.lineTo(p.x, p.y);
+        ctx2d.stroke();
       }
 
       // Reset alpha

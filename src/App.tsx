@@ -440,7 +440,7 @@ export default function App() {
 
       {/* ── Main ── */}
       <main className="app-main">
-        <div className="left-panel-container" style={{ position: "relative", flex: 1, height: "100%", overflow: "hidden", display: "flex" }}>
+        <div className="left-panel-container" style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", display: "flex" }}>
           {activeMode === "painter" && (
             <MusicPainterVisualizer
               deviceId={painterDeviceId}
