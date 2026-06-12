@@ -1345,6 +1345,20 @@
             </div>
             <input id="painter-gate-slider" type="range" min="0.001" max="0.099" step="0.001" value="0.015" style="width: 100%; accent-color: #FF007F; cursor: pointer;">
           </div>
+
+          <!-- Environmental Filter Toggle -->
+          <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06); width: 100%;">
+            <div>
+              <span style="font-size: 12px; font-weight: bold; display: block; color: #ffffff;">🛡️ Filtro de Ambiente</span>
+              <span style="font-size: 10px; color: var(--text-secondary); display: block; margin-top: 2px;">Aísla instrumento/voz eliminando zumbidos</span>
+            </div>
+            <label style="position: relative; display: inline-block; width: 42px; height: 22px; cursor: pointer;">
+              <input id="painter-filter-checkbox" type="checkbox" checked style="opacity: 0; width: 0; height: 0;">
+              <span id="painter-filter-slider" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: #00E5FF; box-shadow: 0 0 10px rgba(0, 229, 255, 0.4); border-radius: 22px; transition: all 0.3s ease;">
+                <span id="painter-filter-knob" style="position: absolute; height: 16px; width: 16px; left: 22px; bottom: 3px; background-color: white; border-radius: 50%; transition: all 0.3s ease; box-shadow: 0 2px 4px rgba(0,0,0,0.4);"></span>
+              </span>
+            </label>
+          </div>
         </div>
 
         <!-- Painter Guide Card (Painter Mode) -->
@@ -1416,6 +1430,7 @@
       painterDeviceId: "",
       painterGain: 3.0,
       painterNoiseGate: 0.015,
+      painterFilter: true,
       synthWaveform: "piano",
       synthOctave: 4,
       snapEnabled: true,
@@ -3052,13 +3067,17 @@
     let painterAudioCtx = null;
     let painterAnalyser = null;
     let painterSource = null;
+    let painterHpFilter = null;
+    let painterLpFilter = null;
     let painterAnimId = null;
     let painterTime = 0;
     let painterTransientFlash = 0;
     let painterSmoothEnergy = 0;
     let painterLastTransientTime = 0;
-    const painterVertexCount = 24;
+    const painterVertexCount = 32; // Higher vertex count for high-fidelity forms
     const painterRadii = new Array(painterVertexCount).fill(100);
+    const painterXCoords = new Array(painterVertexCount).fill(0);
+    const painterYCoords = new Array(painterVertexCount).fill(0);
     let painterParticles = [];
 
     const painterCanvas = document.getElementById("painter-canvas");
@@ -3070,6 +3089,9 @@
     const painterGainText = document.getElementById("painter-gain-text");
     const painterGateSlider = document.getElementById("painter-gate-slider");
     const painterGateText = document.getElementById("painter-gate-text");
+    const painterFilterCheckbox = document.getElementById("painter-filter-checkbox");
+    const painterFilterSlider = document.getElementById("painter-filter-slider");
+    const painterFilterKnob = document.getElementById("painter-filter-knob");
 
     const blockPainterInput = document.getElementById("cd-block-painter-input");
     const blockPainterControls = document.getElementById("cd-block-painter-controls");
@@ -3127,6 +3149,38 @@
       });
     }
 
+    // Filter checkbox listener
+    if (painterFilterCheckbox) {
+      painterFilterCheckbox.addEventListener("change", () => {
+        state.painterFilter = painterFilterCheckbox.checked;
+        if (state.painterFilter) {
+          if (painterFilterSlider) {
+            painterFilterSlider.style.backgroundColor = "#00E5FF";
+            painterFilterSlider.style.boxShadow = "0 0 10px rgba(0, 229, 255, 0.4)";
+          }
+          if (painterFilterKnob) painterFilterKnob.style.left = "22px";
+        } else {
+          if (painterFilterSlider) {
+            painterFilterSlider.style.backgroundColor = "rgba(255,255,255,0.15)";
+            painterFilterSlider.style.boxShadow = "none";
+          }
+          if (painterFilterKnob) painterFilterKnob.style.left = "4px";
+        }
+
+        // Apply filters parameter change dynamically (pop-free)
+        if (painterStarted && painterAudioCtx && painterHpFilter && painterLpFilter) {
+          const t = painterAudioCtx.currentTime;
+          if (state.painterFilter) {
+            painterHpFilter.frequency.setTargetAtTime(95, t, 0.08);
+            painterLpFilter.frequency.setTargetAtTime(3200, t, 0.08);
+          } else {
+            painterHpFilter.frequency.setTargetAtTime(10, t, 0.08);
+            painterLpFilter.frequency.setTargetAtTime(22000, t, 0.08);
+          }
+        }
+      });
+    }
+
     if (btnPainterStart) {
       btnPainterStart.addEventListener("click", () => {
         startPainterAudio();
@@ -3161,10 +3215,25 @@
         }
 
         painterSource = painterAudioCtx.createMediaStreamSource(stream);
+        
+        // Active environmental filter nodes
+        painterHpFilter = painterAudioCtx.createBiquadFilter();
+        painterHpFilter.type = "highpass";
+        painterHpFilter.Q.value = 0.8;
+        painterHpFilter.frequency.value = state.painterFilter ? 95 : 10;
+
+        painterLpFilter = painterAudioCtx.createBiquadFilter();
+        painterLpFilter.type = "lowpass";
+        painterLpFilter.Q.value = 0.8;
+        painterLpFilter.frequency.value = state.painterFilter ? 3200 : 22000;
+
         painterAnalyser = painterAudioCtx.createAnalyser();
         painterAnalyser.fftSize = 1024;
-        painterAnalyser.smoothingTimeConstant = 0.4;
-        painterSource.connect(painterAnalyser);
+        painterAnalyser.smoothingTimeConstant = 0.35; // clean response
+
+        painterSource.connect(painterHpFilter);
+        painterHpFilter.connect(painterLpFilter);
+        painterLpFilter.connect(painterAnalyser);
 
         painterStarted = true;
         if (painterStartOverlay) painterStartOverlay.style.display = "none";
@@ -3197,6 +3266,14 @@
         painterSource.disconnect();
         painterSource = null;
       }
+      if (painterHpFilter) {
+        painterHpFilter.disconnect();
+        painterHpFilter = null;
+      }
+      if (painterLpFilter) {
+        painterLpFilter.disconnect();
+        painterLpFilter = null;
+      }
       if (painterAudioCtx) {
         painterAudioCtx.close().catch(() => {});
         painterAudioCtx = null;
@@ -3215,7 +3292,7 @@
         if (!painterStarted) return;
         painterAnimId = requestAnimationFrame(loop);
 
-        const ctx2d = painterCanvas.getContext("2d");
+        const ctx2d = painterCanvas.getContext("2d", { alpha: false });
         if (!ctx2d) return;
 
         // Resize if needed
@@ -3232,9 +3309,9 @@
         painterTime += 0.015;
         const time = painterTime;
 
-        // Fading trail background
+        // Fading trail background (7% opacity for smooth glowing lines)
         ctx2d.globalCompositeOperation = "source-over";
-        ctx2d.fillStyle = "rgba(0, 0, 0, 0.09)";
+        ctx2d.fillStyle = "rgba(0, 0, 0, 0.07)";
         ctx2d.fillRect(0, 0, w, h);
 
         let rms = 0;
@@ -3303,8 +3380,13 @@
                   size: 2.0 + Math.random() * 4.0,
                   color: NEON_PALETTE[Math.floor(Math.random() * NEON_PALETTE.length)],
                   alpha: 1.0,
-                  decay: 0.012 + Math.random() * 0.018
+                  decay: 0.010 + Math.random() * 0.015
                 });
+              }
+
+              // Cap particles at 200
+              if (painterParticles.length > 200) {
+                painterParticles.splice(0, painterParticles.length - 200);
               }
             }
           }
@@ -3337,13 +3419,14 @@
         const baseRadius = Math.min(w, h) * 0.16;
         const scale = 1.0 + lowEnd * 0.75 + painterTransientFlash * 0.45;
 
-        const xCoords = [];
-        const yCoords = [];
+        // Reuse arrays to avoid memory churn
+        const xCoords = painterXCoords;
+        const yCoords = painterYCoords;
 
         for (let i = 0; i < painterVertexCount; i++) {
           const angle = (i / painterVertexCount) * Math.PI * 2;
-          const wave1 = Math.sin(angle * 3 + time * 3.5) * 35.0 * midHigh;
-          const wave2 = Math.cos(angle * 6 - time * 2.0) * 20.0 * midHigh;
+          const wave1 = Math.sin(angle * 4 + time * 4.0) * 40.0 * midHigh;
+          const wave2 = Math.cos(angle * 8 - time * 2.5) * 22.0 * midHigh;
           const targetRad = baseRadius * scale + wave1 + wave2;
 
           const diff = targetRad - painterRadii[i];
@@ -3353,15 +3436,9 @@
             painterRadii[i] += diff * 0.07;
           }
 
-          xCoords.push(cx + Math.cos(angle) * painterRadii[i]);
-          yCoords.push(cy + Math.sin(angle) * painterRadii[i]);
+          xCoords[i] = cx + Math.cos(angle) * painterRadii[i];
+          yCoords[i] = cy + Math.sin(angle) * painterRadii[i];
         }
-
-        // Outline / Layer 1
-        ctx2d.shadowBlur = 30 + midHigh * 60;
-        ctx2d.shadowColor = "#00E5FF";
-        ctx2d.strokeStyle = "rgba(0, 229, 255, 0.45)";
-        ctx2d.lineWidth = 4 + midHigh * 8;
 
         const drawClosedBlob = () => {
           ctx2d.beginPath();
@@ -3377,13 +3454,37 @@
           ctx2d.closePath();
         };
 
+        // 1. Decorative Outer Ring (Dashed, rotating)
+        ctx2d.strokeStyle = "rgba(157, 78, 221, 0.18)";
+        ctx2d.lineWidth = 1.5;
+        ctx2d.setLineDash([4, 12]);
+        ctx2d.beginPath();
+        ctx2d.arc(cx, cy, baseRadius * scale * 1.32 + Math.sin(time * 0.7) * 10, 0, Math.PI * 2);
+        ctx2d.stroke();
+        ctx2d.setLineDash([]); // Reset
+
+        // 2. Glowing Outline (Layered stroke widths and opacities for hardware accelerated glow)
         drawClosedBlob();
+        ctx2d.shadowBlur = 0; // Disable slow shadowBlur
+
+        ctx2d.strokeStyle = "rgba(0, 229, 255, 0.06)";
+        ctx2d.lineWidth = 32 + midHigh * 30;
         ctx2d.stroke();
 
-        // Layer 2
-        ctx2d.shadowColor = "#9D4EDD";
-        ctx2d.shadowBlur = 20 + lowEnd * 40;
-        const gradMid = ctx2d.createRadialGradient(cx, cy, baseRadius * 0.2, cx, cy, baseRadius * scale * 1.2);
+        ctx2d.strokeStyle = "rgba(0, 229, 255, 0.15)";
+        ctx2d.lineWidth = 16 + midHigh * 15;
+        ctx2d.stroke();
+
+        ctx2d.strokeStyle = "rgba(0, 229, 255, 0.45)";
+        ctx2d.lineWidth = 6 + midHigh * 6;
+        ctx2d.stroke();
+
+        ctx2d.strokeStyle = "rgba(255, 255, 255, 0.95)";
+        ctx2d.lineWidth = 1.5;
+        ctx2d.stroke();
+
+        // 3. Layer 2: Mid Violet Fluid Gradient
+        const gradMid = ctx2d.createRadialGradient(cx, cy, baseRadius * 0.2, cx, cy, baseRadius * scale * 1.25);
         gradMid.addColorStop(0, "rgba(157, 78, 221, 0.25)");
         gradMid.addColorStop(0.5, "rgba(157, 78, 221, 0.12)");
         gradMid.addColorStop(1, "rgba(0, 0, 0, 0)");
@@ -3391,29 +3492,37 @@
         drawClosedBlob();
         ctx2d.fill();
 
-        // Layer 3
-        ctx2d.shadowColor = "#FF007F";
-        ctx2d.shadowBlur = 40 + painterTransientFlash * 40;
+        // 4. Layer 3: Inner Magenta Core
         const gradCore = ctx2d.createRadialGradient(
-          cx + Math.sin(time) * 10, cy + Math.cos(time) * 10, 2,
-          cx, cy, baseRadius * 0.65 * scale
+          cx + Math.sin(time) * 8, cy + Math.cos(time) * 8, 2,
+          cx, cy, baseRadius * 0.68 * scale
         );
-        gradCore.addColorStop(0, "rgba(255, 0, 127, 0.8)");
-        gradCore.addColorStop(0.3, "rgba(255, 0, 127, 0.5)");
-        gradCore.addColorStop(0.7, "rgba(157, 78, 221, 0.2)");
+        gradCore.addColorStop(0, "rgba(255, 0, 127, 0.82)");
+        gradCore.addColorStop(0.35, "rgba(255, 0, 127, 0.45)");
+        gradCore.addColorStop(0.7, "rgba(157, 78, 221, 0.15)");
         gradCore.addColorStop(1, "rgba(0, 0, 0, 0)");
         ctx2d.fillStyle = gradCore;
         drawClosedBlob();
         ctx2d.fill();
 
-        // Particles
-        ctx2d.shadowBlur = 12;
+        // 5. Draw glowing vertex nodes
+        ctx2d.fillStyle = "#00F5D4";
+        const nodeSize = 2.5 + midHigh * 4.5;
+        for (let i = 0; i < painterVertexCount; i++) {
+          if (i % 2 === 0) {
+            ctx2d.beginPath();
+            ctx2d.arc(xCoords[i], yCoords[i], nodeSize, 0, Math.PI * 2);
+            ctx2d.fill();
+          }
+        }
+
+        // 6. Particles
         for (let i = painterParticles.length - 1; i >= 0; i--) {
           const p = painterParticles[i];
           p.x += p.vx;
           p.y += p.vy;
-          p.vx *= 0.97;
-          p.vy *= 0.97;
+          p.vx *= 0.975;
+          p.vy *= 0.975;
           p.alpha -= p.decay;
 
           if (p.alpha <= 0 || p.size <= 0.1) {
@@ -3421,7 +3530,6 @@
             continue;
           }
 
-          ctx2d.shadowColor = p.color;
           ctx2d.fillStyle = p.color;
           ctx2d.globalAlpha = p.alpha;
           ctx2d.beginPath();
@@ -3430,7 +3538,6 @@
         }
 
         ctx2d.globalAlpha = 1.0;
-        ctx2d.shadowBlur = 0;
       }
       loop();
     }

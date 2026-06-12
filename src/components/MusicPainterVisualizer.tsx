@@ -4,6 +4,7 @@ interface MusicPainterVisualizerProps {
   deviceId: string;
   gain: number;
   noiseGate: number;
+  filter: boolean;
 }
 
 // Neon color palette
@@ -29,6 +30,7 @@ export default function MusicPainterVisualizer({
   deviceId,
   gain,
   noiseGate,
+  filter,
 }: MusicPainterVisualizerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -38,6 +40,8 @@ export default function MusicPainterVisualizer({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const hpFilterRef = useRef<BiquadFilterNode | null>(null);
+  const lpFilterRef = useRef<BiquadFilterNode | null>(null);
 
   // UI state
   const [audioStarted, setAudioStarted] = useState(false);
@@ -51,19 +55,43 @@ export default function MusicPainterVisualizer({
   const lastTransientTimeRef = useRef<number>(0);
 
   // Fluid blob geometry
-  const vertexCount = 24;
-  const currentRadiiRef = useRef<number[]>(new Array(vertexCount).fill(100));
+  const vertexCount = 32; // Higher vertex count for high-fidelity forms
+  const radiiRef = useRef<number[]>(new Array(vertexCount).fill(100));
+  const xCoordsRef = useRef<number[]>(new Array(vertexCount).fill(0));
+  const yCoordsRef = useRef<number[]>(new Array(vertexCount).fill(0));
 
   // Particles
   const particlesRef = useRef<Particle[]>([]);
 
-  // Gain & NoiseGate refs to read them instantly inside the loop
+  // Gain, NoiseGate & Filter refs to read them instantly inside the loop
   const gainRef = useRef(gain);
   const noiseGateRef = useRef(noiseGate);
+  const filterRef = useRef(filter);
+
   useEffect(() => {
     gainRef.current = gain;
     noiseGateRef.current = noiseGate;
-  }, [gain, noiseGate]);
+    filterRef.current = filter;
+  }, [gain, noiseGate, filter]);
+
+  // Handle ambient filter toggle dynamically (pop-free using setTargetAtTime)
+  useEffect(() => {
+    const ctx = audioCtxRef.current;
+    const hp = hpFilterRef.current;
+    const lp = lpFilterRef.current;
+    if (ctx && hp && lp) {
+      const t = ctx.currentTime;
+      if (filter) {
+        // Cut low hum (<95Hz) and high hiss (>3200Hz) to isolate voice / instruments
+        hp.frequency.setTargetAtTime(95, t, 0.08);
+        lp.frequency.setTargetAtTime(3200, t, 0.08);
+      } else {
+        // Bypass filters completely
+        hp.frequency.setTargetAtTime(10, t, 0.08);
+        lp.frequency.setTargetAtTime(22000, t, 0.08);
+      }
+    }
+  }, [filter]);
 
   // Request audio permission and start stream
   const startAudio = async () => {
@@ -108,14 +136,31 @@ export default function MusicPainterVisualizer({
       const source = ctx.createMediaStreamSource(stream);
       sourceRef.current = source;
 
+      // Biquad filters for environmental noise filtering
+      const hpFilter = ctx.createBiquadFilter();
+      hpFilter.type = "highpass";
+      hpFilter.Q.value = 0.8;
+      hpFilter.frequency.value = filter ? 95 : 10;
+      hpFilterRef.current = hpFilter;
+
+      const lpFilter = ctx.createBiquadFilter();
+      lpFilter.type = "lowpass";
+      lpFilter.Q.value = 0.8;
+      lpFilter.frequency.value = filter ? 3200 : 22000;
+      lpFilterRef.current = lpFilter;
+
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 1024;
-      analyser.smoothingTimeConstant = 0.4;
+      analyser.smoothingTimeConstant = 0.35; // slightly faster response
       analyserRef.current = analyser;
 
-      source.connect(analyser);
+      // Connect source -> environmental filter chain -> analyser
+      source.connect(hpFilter);
+      hpFilter.connect(lpFilter);
+      lpFilter.connect(analyser);
+
       setAudioStarted(true);
-      console.log("Audio input stream started successfully! 🎤");
+      console.log("Audio input stream with environmental filter started successfully! 🎤");
     } catch (err: any) {
       console.error("Failed to capture audio stream:", err);
       setErrorMsg("Permiso de audio denegado o dispositivo no disponible.");
@@ -150,7 +195,7 @@ export default function MusicPainterVisualizer({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx2d = canvas.getContext("2d");
+    const ctx2d = canvas.getContext("2d", { alpha: false }); // Optimize canvas context settings
     if (!ctx2d) return;
 
     // Handle canvas sizing
@@ -164,8 +209,8 @@ export default function MusicPainterVisualizer({
     resizeCanvas();
     window.addEventListener("resize", resizeCanvas);
 
-    // Initialise radii list
-    const radii = currentRadiiRef.current;
+    // Initialise radii lists
+    const radii = radiiRef.current;
     const initialRadius = Math.min(canvas.width, canvas.height) * 0.16;
     for (let i = 0; i < vertexCount; i++) {
       radii[i] = initialRadius;
@@ -186,9 +231,9 @@ export default function MusicPainterVisualizer({
       timeRef.current += 0.015;
       const time = timeRef.current;
 
-      // Fading background for neon trails
+      // Fading background for neon trails (7% opacity for beautiful fluid trails)
       ctx2d.globalCompositeOperation = "source-over";
-      ctx2d.fillStyle = "rgba(0, 0, 0, 0.09)"; // 9% opacity trails
+      ctx2d.fillStyle = "rgba(0, 0, 0, 0.07)";
       ctx2d.fillRect(0, 0, w, h);
 
       let lowEnd = 0;
@@ -209,7 +254,6 @@ export default function MusicPainterVisualizer({
         }
         rms = Math.sqrt(rmsSum / timeData.length);
 
-        // Read dynamic gain and noise gate values
         const currentGain = gainRef.current;
         const currentGate = noiseGateRef.current;
 
@@ -270,8 +314,13 @@ export default function MusicPainterVisualizer({
                 size: 2.0 + Math.random() * 4.0,
                 color: NEON_PALETTE[Math.floor(Math.random() * NEON_PALETTE.length)],
                 alpha: 1.0,
-                decay: 0.012 + Math.random() * 0.018,
+                decay: 0.010 + Math.random() * 0.015, // slightly slower fade
               });
+            }
+
+            // Cap maximum active particles to prevent GC/rendering bottleneck
+            if (particlesRef.current.length > 200) {
+              particlesRef.current.splice(0, particlesRef.current.length - 200);
             }
           }
         }
@@ -297,7 +346,7 @@ export default function MusicPainterVisualizer({
         smoothEnergyRef.current = smoothEnergyRef.current * 0.95;
       }
 
-      // Draw bioluminescent fluids
+      // Draw bioluminescent fluids using screen additive blend
       ctx2d.globalCompositeOperation = "screen";
 
       const cx = w / 2;
@@ -305,37 +354,32 @@ export default function MusicPainterVisualizer({
       const baseRadius = Math.min(w, h) * 0.16;
       const scale = 1.0 + lowEnd * 0.75 + transientFlashRef.current * 0.45;
 
-      // Compute targets and update vertices
-      const xCoords: number[] = [];
-      const yCoords: number[] = [];
+      // Read/write preallocated coordinates (avoids GC allocations)
+      const xCoords = xCoordsRef.current;
+      const yCoords = yCoordsRef.current;
 
       for (let i = 0; i < vertexCount; i++) {
         const angle = (i / vertexCount) * Math.PI * 2;
         
-        // Deform with mid/high frequency waves
-        const wave1 = Math.sin(angle * 3 + time * 3.5) * 35.0 * midHigh;
-        const wave2 = Math.cos(angle * 6 - time * 2.0) * 20.0 * midHigh;
+        // Form complex geometric ripples
+        const wave1 = Math.sin(angle * 4 + time * 4.0) * 40.0 * midHigh;
+        const wave2 = Math.cos(angle * 8 - time * 2.5) * 22.0 * midHigh;
         const targetRadius = baseRadius * scale + wave1 + wave2;
 
-        // Transitions: instant on expand (attack), smooth linear on contract (decay)
+        // Transitions: instant expansion, smooth decay contraction
         const diff = targetRadius - radii[i];
         if (diff > 0) {
-          radii[i] = targetRadius; // instant attack
+          radii[i] = targetRadius; // instant attack (no smoothing)
         } else {
-          radii[i] += diff * 0.07; // smooth linear contract
+          radii[i] += diff * 0.07; // smooth linear contract transition
         }
 
-        xCoords.push(cx + Math.cos(angle) * radii[i]);
-        yCoords.push(cy + Math.sin(angle) * radii[i]);
+        xCoords[i] = cx + Math.cos(angle) * radii[i];
+        yCoords[i] = cy + Math.sin(angle) * radii[i];
       }
 
-      // Draw Layer 1: Outermost Cyan Blob (Glowing outline)
-      ctx2d.shadowBlur = 30 + midHigh * 60;
-      ctx2d.shadowColor = "#00E5FF";
-      ctx2d.strokeStyle = "rgba(0, 229, 255, 0.45)";
-      ctx2d.lineWidth = 4 + midHigh * 8;
-      
-      const drawClosedBlob = () => {
+      // Helper to trace closed bezier blob path
+      const traceClosedBlob = () => {
         ctx2d.beginPath();
         const startX = (xCoords[0] + xCoords[vertexCount - 1]) / 2;
         const startY = (yCoords[0] + yCoords[vertexCount - 1]) / 2;
@@ -349,44 +393,77 @@ export default function MusicPainterVisualizer({
         ctx2d.closePath();
       };
 
-      drawClosedBlob();
+      // 1. Decorative Outer Star/Plasma Ring (Dashed, rotating slowly)
+      ctx2d.strokeStyle = "rgba(157, 78, 221, 0.18)";
+      ctx2d.lineWidth = 1.5;
+      ctx2d.setLineDash([4, 12]);
+      ctx2d.beginPath();
+      ctx2d.arc(cx, cy, baseRadius * scale * 1.32 + Math.sin(time * 0.7) * 10, 0, Math.PI * 2);
+      ctx2d.stroke();
+      ctx2d.setLineDash([]); // Reset dash
+
+      // 2. Layer 1: Glowing Cyan Outline (No shadowBlur for 60fps hardware acceleration!)
+      // Layered stroke widths and translucent opacities create a highly realistic glow
+      traceClosedBlob();
+      ctx2d.shadowBlur = 0; // Disable heavy shadowBlur
+
+      ctx2d.strokeStyle = "rgba(0, 229, 255, 0.06)";
+      ctx2d.lineWidth = 32 + midHigh * 30;
       ctx2d.stroke();
 
-      // Draw Layer 2: Mid-range Violet Fluid (Translucent gradient fill)
-      ctx2d.shadowColor = "#9D4EDD";
-      ctx2d.shadowBlur = 20 + lowEnd * 40;
-      const gradMid = ctx2d.createRadialGradient(cx, cy, baseRadius * 0.2, cx, cy, baseRadius * scale * 1.2);
+      ctx2d.strokeStyle = "rgba(0, 229, 255, 0.15)";
+      ctx2d.lineWidth = 16 + midHigh * 15;
+      ctx2d.stroke();
+
+      ctx2d.strokeStyle = "rgba(0, 229, 255, 0.45)";
+      ctx2d.lineWidth = 6 + midHigh * 6;
+      ctx2d.stroke();
+
+      ctx2d.strokeStyle = "rgba(255, 255, 255, 0.95)";
+      ctx2d.lineWidth = 1.5;
+      ctx2d.stroke();
+
+      // 3. Layer 2: Mid-range Violet Fluid (Translucent gradient fill)
+      const gradMid = ctx2d.createRadialGradient(cx, cy, baseRadius * 0.2, cx, cy, baseRadius * scale * 1.25);
       gradMid.addColorStop(0, "rgba(157, 78, 221, 0.25)");
       gradMid.addColorStop(0.5, "rgba(157, 78, 221, 0.12)");
       gradMid.addColorStop(1, "rgba(0, 0, 0, 0)");
       ctx2d.fillStyle = gradMid;
-      drawClosedBlob();
+      traceClosedBlob();
       ctx2d.fill();
 
-      // Draw Layer 3: Inner Magenta Core (Hot bioluminescent core)
-      ctx2d.shadowColor = "#FF007F";
-      ctx2d.shadowBlur = 40 + transientFlashRef.current * 40;
+      // 4. Layer 3: Inner Magenta Core (Hot bioluminescent core)
       const gradCore = ctx2d.createRadialGradient(
-        cx + Math.sin(time) * 10, cy + Math.cos(time) * 10, 2,
-        cx, cy, baseRadius * 0.65 * scale
+        cx + Math.sin(time) * 8, cy + Math.cos(time) * 8, 2,
+        cx, cy, baseRadius * 0.68 * scale
       );
-      gradCore.addColorStop(0, "rgba(255, 0, 127, 0.8)");
-      gradCore.addColorStop(0.3, "rgba(255, 0, 127, 0.5)");
-      gradCore.addColorStop(0.7, "rgba(157, 78, 221, 0.2)");
+      gradCore.addColorStop(0, "rgba(255, 0, 127, 0.82)");
+      gradCore.addColorStop(0.35, "rgba(255, 0, 127, 0.45)");
+      gradCore.addColorStop(0.7, "rgba(157, 78, 221, 0.15)");
       gradCore.addColorStop(1, "rgba(0, 0, 0, 0)");
       ctx2d.fillStyle = gradCore;
-      drawClosedBlob();
+      traceClosedBlob();
       ctx2d.fill();
 
-      // Draw & Update Particles
-      ctx2d.shadowBlur = 12;
+      // 5. Draw small glowing nodes at every 2nd vertex (adds structure and high visual feedback)
+      ctx2d.fillStyle = "#00F5D4";
+      const nodeSize = 2.5 + midHigh * 4.5;
+      for (let i = 0; i < vertexCount; i++) {
+        if (i % 2 === 0) {
+          ctx2d.beginPath();
+          ctx2d.arc(xCoords[i], yCoords[i], nodeSize, 0, Math.PI * 2);
+          ctx2d.fill();
+        }
+      }
+
+      // 6. Draw & Update Particles
       const particles = particlesRef.current;
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         p.x += p.vx;
         p.y += p.vy;
-        p.vx *= 0.97;
-        p.vy *= 0.97;
+        p.vx *= 0.975;
+        p.vy *= 0.975;
         p.alpha -= p.decay;
 
         if (p.alpha <= 0 || p.size <= 0.1) {
@@ -394,7 +471,6 @@ export default function MusicPainterVisualizer({
           continue;
         }
 
-        ctx2d.shadowColor = p.color;
         ctx2d.fillStyle = p.color;
         ctx2d.globalAlpha = p.alpha;
         ctx2d.beginPath();
@@ -402,9 +478,8 @@ export default function MusicPainterVisualizer({
         ctx2d.fill();
       }
 
-      // Reset styles for next frame
+      // Reset alpha
       ctx2d.globalAlpha = 1.0;
-      ctx2d.shadowBlur = 0;
     };
 
     draw();

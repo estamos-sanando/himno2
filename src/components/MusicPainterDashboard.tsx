@@ -7,6 +7,8 @@ interface MusicPainterDashboardProps {
   noiseGate: number;
   onNoiseGateChange: (gate: number) => void;
   selectedDeviceId: string;
+  filter: boolean;
+  onFilterChange: (filter: boolean) => void;
 }
 
 export default function MusicPainterDashboard({
@@ -16,6 +18,8 @@ export default function MusicPainterDashboard({
   noiseGate,
   onNoiseGateChange,
   selectedDeviceId,
+  filter,
+  onFilterChange,
 }: MusicPainterDashboardProps) {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
 
@@ -157,6 +161,42 @@ export default function MusicPainterDashboard({
                 cursor: "pointer",
               }}
             />
+          </div>
+
+          {/* Environmental Filter Switch */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: "12px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+            <div>
+              <span style={{ fontSize: "12px", fontWeight: "bold", display: "block", color: "#ffffff" }}>🛡️ Filtro de Ambiente</span>
+              <span style={{ fontSize: "10px", color: "var(--text-secondary)", display: "block", marginTop: "2px" }}>Aísla instrumento/voz eliminando zumbidos</span>
+            </div>
+            <label style={{ position: "relative", display: "inline-block", width: "42px", height: "22px", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={filter}
+                onChange={(e) => onFilterChange(e.target.checked)}
+                style={{ opacity: 0, width: 0, height: 0 }}
+              />
+              <span style={{
+                position: "absolute",
+                top: 0, left: 0, right: 0, bottom: 0,
+                backgroundColor: filter ? "#00E5FF" : "rgba(255,255,255,0.15)",
+                boxShadow: filter ? "0 0 10px rgba(0, 229, 255, 0.4)" : "none",
+                borderRadius: "22px",
+                transition: "all 0.3s ease",
+              }}>
+                <span style={{
+                  position: "absolute",
+                  height: "16px",
+                  width: "16px",
+                  left: filter ? "22px" : "4px",
+                  bottom: "3px",
+                  backgroundColor: "#ffffff",
+                  borderRadius: "50%",
+                  transition: "all 0.3s ease",
+                  boxShadow: "0 2px 4px rgba(0,0,0,0.4)",
+                }} />
+              </span>
+            </label>
           </div>
         </div>
 

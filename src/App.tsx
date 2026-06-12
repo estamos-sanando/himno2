@@ -45,6 +45,7 @@ export default function App() {
   const [painterDeviceId, setPainterDeviceId] = useState<string>("");
   const [painterGain, setPainterGain] = useState<number>(3.0);
   const [painterNoiseGate, setPainterNoiseGate] = useState<number>(0.015);
+  const [painterFilter, setPainterFilter] = useState<boolean>(true);
 
   // UI display state (throttled ~12 fps)
   const [bpm,           setBpm]           = useState(SONGS[0].bpmBase);
@@ -445,6 +446,7 @@ export default function App() {
               deviceId={painterDeviceId}
               gain={painterGain}
               noiseGate={painterNoiseGate}
+              filter={painterFilter}
             />
           )}
           <section className={`panel-webcam ${activeMode === "painter" ? "webcam-corner" : ""}`} style={activeMode === "painter" ? { position: "absolute" } : undefined}>
@@ -495,6 +497,8 @@ export default function App() {
             onGainChange={setPainterGain}
             noiseGate={painterNoiseGate}
             onNoiseGateChange={setPainterNoiseGate}
+            filter={painterFilter}
+            onFilterChange={setPainterFilter}
           />
         )}
       </main>
