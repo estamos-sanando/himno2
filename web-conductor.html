@@ -1190,12 +1190,13 @@
 
     // ── SCROLL-DRIVEN VIDEO LOGO SYSTEM v7 ──
     const svlVideo    = document.getElementById("scroll-video-logo");
-        const svlPrompt   = document.getElementById("scroll-prompt");
+    const svlPrompt   = document.getElementById("scroll-prompt");
 
     let svlTarget   = 0;
     let svlCurrent  = 0;
     let svlDur      = 0;
     let svlLastSeek = -1;
+    let svlLastSeekTime = 0;
     let svlEntered  = false;
     let svlVideoLoaded = false;
     let svlVideoErrored = false;
@@ -1218,7 +1219,7 @@
     }
 
     function svlSetFrame() {
-      if (!svlVideo || !svlVideo.duration || isNaN(svlVideo.duration)) return;
+      if (!svlVideo || !svlVideo.duration || isNaN(svlVideo.duration) || !isFinite(svlVideo.duration) || svlVideo.duration <= 0) return;
       svlDur = svlVideo.duration;
       // Show end of video (assembled shield) — SVL_INVERT = true
       const initT = Math.max(0.01, svlDur - 0.08);
@@ -1232,7 +1233,6 @@
       svlVideo.addEventListener("loadedmetadata", svlSetFrame, { once: true });
       svlVideo.addEventListener("error", () => {
         svlVideoErrored = true;
-        // Video failed — keep the static image, that's fine
         console.warn("SVL: video failed, using static image");
       });
       if (svlVideo.readyState >= 2) svlSetFrame();
@@ -1263,13 +1263,15 @@
       }).catch(() => {});
     }
 
-        if (introOverlay) {
+    if (introOverlay) {
       introOverlay.addEventListener("wheel", (e) => {
         e.preventDefault();
         svlPrime();
-        const norm  = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
-        const speed = Math.min(Math.abs(e.deltaY), 100) / 100;
-        svlTarget = Math.max(0, Math.min(1, svlTarget + norm * speed * 0.025));
+        const norm = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
+        // Normalized step: base 0.04 scaled slightly based on deltaY magnitude to feel natural
+        const baseStep = 0.04;
+        const step = baseStep * Math.max(0.5, Math.min(2.0, Math.abs(e.deltaY) / 60));
+        svlTarget = Math.max(0, Math.min(1, svlTarget + norm * step));
       }, { passive: false });
 
       let svlLastTY = 0;
@@ -1300,24 +1302,41 @@
         svlTarget = Math.max(0, svlTarget - 0.008);
       }
 
+      // Dynamic duration check (polls element if svlDur is not set or invalid yet)
+      if (svlVideo && (!svlDur || !isFinite(svlDur) || svlDur <= 0)) {
+        const d = svlVideo.duration;
+        if (d && !isNaN(d) && isFinite(d) && d > 0) {
+          svlDur = d;
+          const initT = Math.max(0.01, d - 0.08);
+          svlVideo.currentTime = initT;
+          svlLastSeek = initT;
+          svlRevealVideo();
+        }
+      }
+
       const diff = svlTarget - svlCurrent;
-      if (Math.abs(diff) > 0.0003) {
+      if (Math.abs(diff) > 0.0001) {
         svlCurrent += diff * 0.09;
         svlCurrent  = Math.max(0, Math.min(1, svlCurrent));
         const p = svlCurrent;
 
-        if (svlDur && svlVideo) {
+        const now = performance.now();
+        if (svlDur && isFinite(svlDur) && svlDur > 0 && svlVideo && !svlVideo.seeking && now - svlLastSeekTime > 30) {
           // INVERT=true: p=0 → end of video (assembled), p=1 → near start (disassembled)
           const mapped  = Math.max(0.01, (1 - p) * svlDur - 0.04);
           const clamped = Math.min(svlDur - 0.04, mapped);
-          if (Math.abs(clamped - svlLastSeek) > 0.004) {
+          if (Math.abs(clamped - svlLastSeek) > 0.01) {
             svlVideo.currentTime = clamped;
             svlLastSeek = clamped;
+            svlLastSeekTime = now;
           }
         }
 
-        // Fade video out as user scrolls
-        const opacity = String(Math.max(0, 1 - p * 1.5));
+        // Fade video out as user scrolls (stays fully visible until 80% scroll)
+        let opacity = "1";
+        if (p > 0.8) {
+          opacity = String(Math.max(0, 1 - (p - 0.8) * 5));
+        }
         if (svlVideo && svlVideoLoaded) {
           svlVideo.style.opacity = opacity;
         }
@@ -1333,7 +1352,6 @@
       }
       requestAnimationFrame(svlTick);
     }
-    requestAnimationFrame(svlTick);
 
     const webcamVideo = document.getElementById("webcam-video");
     const webcamCanvas = document.getElementById("webcam-canvas");

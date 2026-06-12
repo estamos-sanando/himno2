@@ -14,6 +14,7 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
   const targetProg  = useRef(0);
   const currentProg = useRef(0);
   const lastSeekT   = useRef(-1);
+  const lastSeekTime = useRef(0);
   const rafId       = useRef(0);
   const entered     = useRef(false);
   const durRef      = useRef(0);
@@ -42,7 +43,7 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
 
     const setupVideo = () => {
       const dur = video.duration;
-      if (!dur || isNaN(dur)) return;
+      if (!dur || isNaN(dur) || !isFinite(dur) || dur <= 0) return;
       durRef.current = dur;
       const initT = INVERT ? Math.max(0.01, dur - 0.08) : 0.02;
       video.addEventListener("seeked", revealVideo, { once: true });
@@ -102,7 +103,7 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
       primed = true;
       revealVideo();
       const v = videoRef.current;
-      if (v && durRef.current) {
+      if (v) {
         v.play().then(() => setTimeout(() => v.pause(), 40)).catch(() => {});
       }
     };
@@ -110,9 +111,11 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       prime();
-      const norm  = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
-      const speed = Math.min(Math.abs(e.deltaY), 100) / 100;
-      targetProg.current = Math.max(0, Math.min(1, targetProg.current + norm * speed * 0.025));
+      const norm = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
+      // Normalized step: base 0.04 scaled slightly based on deltaY magnitude to feel natural
+      const baseStep = 0.04;
+      const step = baseStep * Math.max(0.5, Math.min(2.0, Math.abs(e.deltaY) / 60));
+      targetProg.current = Math.max(0, Math.min(1, targetProg.current + norm * step));
     };
 
     let lastTY = 0;
@@ -141,7 +144,7 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
       el.removeEventListener("touchmove",  onTouchMove);
       el.removeEventListener("click",      onClick);
     };
-  }, []);
+  }, [revealVideo]);
 
   // ── rAF LOOP ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -149,7 +152,7 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
       // Keyboard input handling
       if (keysPressed.current["ArrowUp"]) {
         const v = videoRef.current;
-        if (v && durRef.current) {
+        if (v) {
           v.play().then(() => setTimeout(() => v.pause(), 40)).catch(() => {});
         }
         targetProg.current = Math.min(1, targetProg.current + 0.008);
@@ -158,28 +161,45 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
         targetProg.current = Math.max(0, targetProg.current - 0.008);
       }
 
+      // Dynamic duration check (polls element if durRef.current is not set or invalid yet)
+      const v = videoRef.current;
+      if (v && (!durRef.current || !isFinite(durRef.current) || durRef.current <= 0)) {
+        const d = v.duration;
+        if (d && !isNaN(d) && isFinite(d) && d > 0) {
+          durRef.current = d;
+          const initT = INVERT ? Math.max(0.01, d - 0.08) : 0.02;
+          v.currentTime = initT;
+          lastSeekT.current = initT;
+          revealVideo();
+        }
+      }
+
       const diff = targetProg.current - currentProg.current;
-      if (Math.abs(diff) > 0.0003) {
+      if (Math.abs(diff) > 0.0001) {
         currentProg.current += diff * 0.09;
         currentProg.current  = Math.max(0, Math.min(1, currentProg.current));
         const p = currentProg.current;
 
-        // Seek video
+        // Seek video (throttled to avoid hardware decoder starvation)
         const dur = durRef.current;
-        const v   = videoRef.current;
-        if (dur && v) {
+        const now = performance.now();
+        if (dur && isFinite(dur) && dur > 0 && v && !v.seeking && now - lastSeekTime.current > 30) {
           const mapped  = INVERT
             ? Math.max(0.01, (1 - p) * dur - 0.04)
             : Math.min(dur - 0.04, p * dur + 0.01);
           const clamped = Math.max(0.01, Math.min(dur - 0.04, mapped));
-          if (Math.abs(clamped - lastSeekT.current) > 0.004) {
+          if (Math.abs(clamped - lastSeekT.current) > 0.01) {
             v.currentTime   = clamped;
             lastSeekT.current = clamped;
+            lastSeekTime.current = now;
           }
         }
 
-        // Fade video out as user scrolls
-        const opacity = String(Math.max(0, 1 - p * 1.5));
+        // Fade video out as user scrolls (stays fully visible until 80% scroll)
+        let opacity = "1";
+        if (p > 0.8) {
+          opacity = String(Math.max(0, 1 - (p - 0.8) * 5));
+        }
         if (videoLoaded.current && v) {
           v.style.opacity = opacity;
         }
@@ -198,7 +218,7 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
     };
     rafId.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId.current);
-  }, [onStart]);
+  }, [onStart, revealVideo]);
 
   // ── RENDER ───────────────────────────────────────────────────────────────
   return (
