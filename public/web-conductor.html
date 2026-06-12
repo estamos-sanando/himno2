@@ -633,6 +633,11 @@
       100% { box-shadow: 0 0 30px rgba(116,172,223,0.4), inset 0 0 15px rgba(116,172,223,0.2); }
     }
 
+    @keyframes svl-dot-blink {
+      0% { opacity: 0.15; }
+      100% { opacity: 0.6; }
+    }
+
     
 
     .scroll-prompt-indicator {
@@ -949,6 +954,86 @@
         <!-- Enter button -->
         <button id="btn-ingresar" class="svl-btn-ingresar">Ingresar</button>
         <!-- Scroll indicator removed — hand tracking only -->
+
+        <!-- TouchDesigner Connection Status Indicator (top-right) -->
+        <div id="svl-td-indicator" style="
+          position: absolute;
+          top: clamp(20px, 3.5vh, 40px);
+          right: clamp(20px, 3.5vw, 40px);
+          z-index: 8;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: rgba(0, 0, 0, 0.4);
+          backdrop-filter: blur(8px);
+          -webkit-backdrop-filter: blur(8px);
+          padding: 8px 16px;
+          border-radius: 20px;
+          border: 1px solid rgba(116, 172, 223, 0.25);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+          pointer-events: none;
+          transition: border-color 0.4s ease;
+        ">
+          <div id="svl-td-dot" style="
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ffffff;
+            box-shadow: 0 0 4px rgba(255, 255, 255, 0.4);
+            opacity: 0.4;
+            animation: svl-dot-blink 1.5s infinite alternate;
+          "></div>
+          <span id="svl-td-text" style="
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            font-family: inherit;
+            text-shadow: none;
+            transition: color 0.4s ease;
+          ">TD Link: Desconectado</span>
+        </div>
+
+        <!-- Pinch progress bar (bottom center) -->
+        <div id="svl-pinch-visualizer" style="
+          position: absolute;
+          bottom: clamp(100px, 16vh, 160px);
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 8;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 8px;
+          pointer-events: none;
+          opacity: 0;
+          transition: opacity 0.4s ease;
+        ">
+          <div style="
+            width: 120px;
+            height: 4px;
+            border-radius: 2px;
+            background: rgba(116, 172, 223, 0.2);
+            border: 1px solid rgba(116, 172, 223, 0.3);
+            overflow: hidden;
+          ">
+            <div id="svl-pinch-progress" style="
+              height: 100%;
+              width: 0%;
+              background: linear-gradient(90deg, #74acdf, #ffffff);
+              border-radius: 2px;
+              transition: width 0.05s linear;
+            "></div>
+          </div>
+          <span style="
+            font-size: 9px;
+            letter-spacing: 2px;
+            color: rgba(116, 172, 223, 0.6);
+            text-transform: uppercase;
+            font-weight: 700;
+          ">🤏 ← cerrar · abrir → ✋</span>
+        </div>
 
         <!-- Mini webcam preview (bottom-right corner) -->
         <canvas id="svl-webcam-canvas" style="
@@ -1290,8 +1375,8 @@
     function svlSetFrame() {
       if (!svlVideo || !svlVideo.duration || isNaN(svlVideo.duration) || !isFinite(svlVideo.duration) || svlVideo.duration <= 0) return;
       svlDur = svlVideo.duration;
-      // Show end of video (assembled shield) — SVL_INVERT = true
-      const initT = Math.max(0.01, svlDur - 0.08);
+      // Show start of video (assembled shield)
+      const initT = 0.01;
       svlVideo.addEventListener("seeked", svlRevealVideo, { once: true });
       svlVideo.currentTime = initT;
       svlLastSeek = initT;
@@ -1308,20 +1393,6 @@
       else if (svlVideo.readyState >= 1) svlSetFrame();
     }
 
-    // Keyboard navigation
-    window.addEventListener("keydown", (e) => {
-      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-        e.preventDefault();
-        svlPrime();
-        svlKeysPressed[e.key] = true;
-      }
-    });
-    window.addEventListener("keyup", (e) => {
-      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-        svlKeysPressed[e.key] = false;
-      }
-    });
-
     // Input handlers
     let svlPrimed = false;
     // Intro pinch-to-scrub: stores the latest MediaPipe hand landmarks during intro
@@ -1330,6 +1401,7 @@
     let svlIntroLandmarker = null;
     const SVL_PINCH_CLOSED = 0.04;  // fingers together  -> video at t=0 (assembled)
     const SVL_PINCH_OPEN   = 0.22;  // fingers spread    -> video at end (disassembled)
+    
     function svlPrime() {
       if (svlPrimed || !svlVideo) return;
       svlPrimed = true;
@@ -1340,33 +1412,6 @@
     }
 
     if (introOverlay) {
-      introOverlay.addEventListener("wheel", (e) => {
-        e.preventDefault();
-        svlPrime();
-        const norm = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
-        // Normalized step: base 0.04 scaled slightly based on deltaY magnitude to feel natural
-        const baseStep = 0.04;
-        const step = baseStep * Math.max(0.5, Math.min(2.0, Math.abs(e.deltaY) / 60));
-        svlTarget = Math.max(0, Math.min(1, svlTarget + norm * step));
-      }, { passive: false });
-
-      let svlLastTY = 0;
-      introOverlay.addEventListener("touchstart", (e) => {
-        if (e.touches.length === 1) { svlLastTY = e.touches[0].clientY; svlPrime(); }
-      }, { passive: true });
-      introOverlay.addEventListener("touchmove", (e) => {
-        if (e.touches.length !== 1) return;
-        e.preventDefault();
-        const dy = svlLastTY - e.touches[0].clientY;
-        svlLastTY = e.touches[0].clientY;
-        svlTarget = Math.max(0, Math.min(1, svlTarget + (dy / window.innerHeight) * 2.0));
-      }, { passive: false });
-
-      // Click/tap anywhere also progresses (for mobile that can't scroll)
-      introOverlay.addEventListener("click", () => {
-        svlTarget = Math.min(1, svlTarget + 0.15);
-      });
-
       // Enter button click listener
       const btnIngresar = document.getElementById("btn-ingresar");
       if (btnIngresar) {
@@ -1377,6 +1422,63 @@
         });
       }
     }
+
+    // WebSocket connection to TouchDesigner with auto-reconnect
+    let svlSocket = null;
+    let svlTdConnected = false;
+
+    function connectTouchDesigner() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const port = urlParams.get("tdPort") || "9980";
+      const wsUrl = `ws://localhost:${port}`;
+      console.log(`Connecting to TouchDesigner WebSocket: ${wsUrl}...`);
+      
+      const ws = new WebSocket(wsUrl);
+      svlSocket = ws;
+
+      const tdDot = document.getElementById("svl-td-dot");
+      const tdText = document.getElementById("svl-td-text");
+
+      ws.onopen = () => {
+        console.log("TouchDesigner WebSocket Connected! 🔗");
+        svlTdConnected = true;
+        if (tdDot) {
+          tdDot.style.background = "#74acdf";
+          tdDot.style.boxShadow = "0 0 8px #74acdf, 0 0 16px #74acdf";
+          tdDot.style.opacity = "1";
+          tdDot.style.animation = "none";
+        }
+        if (tdText) {
+          tdText.style.color = "#ffffff";
+          tdText.style.textShadow = "0 0 8px rgba(116, 172, 223, 0.3)";
+          tdText.textContent = "TD Link: Conectado";
+        }
+      };
+
+      ws.onclose = () => {
+        svlTdConnected = false;
+        svlSocket = null;
+        if (tdDot) {
+          tdDot.style.background = "#ffffff";
+          tdDot.style.boxShadow = "0 0 4px rgba(255, 255, 255, 0.4)";
+          tdDot.style.opacity = "0.4";
+          tdDot.style.animation = "svl-dot-blink 1.5s infinite alternate";
+        }
+        if (tdText) {
+          tdText.style.color = "rgba(255, 255, 255, 0.5)";
+          tdText.style.textShadow = "none";
+          tdText.textContent = "TD Link: Desconectado";
+        }
+        // Reconnect after 3 seconds
+        setTimeout(connectTouchDesigner, 3000);
+      };
+
+      ws.onerror = () => {
+        // ws.close() triggers onclose
+      };
+    }
+
+    connectTouchDesigner();
 
     // ── INTRO PINCH-TO-SCRUB: Independent camera and hand detection ──────────
     async function initIntroPinchTracking() {
@@ -1448,6 +1550,46 @@
               ctx2d.translate(-svlWebcamCanvas.width, 0);
               ctx2d.drawImage(introVid, 0, 0, svlWebcamCanvas.width, svlWebcamCanvas.height);
               ctx2d.restore();
+
+              // Draw hand landmarks (mirrored)
+              if (svlLatestLandmarks && svlLatestLandmarks.landmarks && svlLatestLandmarks.landmarks.length > 0) {
+                const mx = (x) => (1 - x) * svlWebcamCanvas.width;
+                const my = (y) => y * svlWebcamCanvas.height;
+                const CONNECTIONS = [
+                  [0,1],[1,2],[2,3],[3,4],
+                  [0,5],[5,6],[6,7],[7,8],
+                  [5,9],[9,10],[10,11],[11,12],
+                  [9,13],[13,14],[14,15],[15,16],
+                  [13,17],[0,17],[17,18],[18,19],[19,20]
+                ];
+                for (const marks of svlLatestLandmarks.landmarks) {
+                  if (marks.length < 21) continue;
+
+                  // Connections
+                  ctx2d.lineWidth = 1.5;
+                  ctx2d.strokeStyle = "#74acdf"; // Celestial Blue
+                  ctx2d.globalAlpha = 0.8;
+                  for (const [a, b] of CONNECTIONS) {
+                    ctx2d.beginPath();
+                    ctx2d.moveTo(mx(marks[a].x), my(marks[a].y));
+                    ctx2d.lineTo(mx(marks[b].x), my(marks[b].y));
+                    ctx2d.stroke();
+                  }
+
+                  // Joints
+                  ctx2d.globalAlpha = 1.0;
+                  for (let i = 0; i < marks.length; i++) {
+                    const pt = marks[i];
+                    ctx2d.beginPath();
+                    ctx2d.arc(mx(pt.x), my(pt.y), 3, 0, Math.PI * 2);
+                    ctx2d.fillStyle = "#ffffff";
+                    ctx2d.fill();
+                    ctx2d.strokeStyle = "#74acdf";
+                    ctx2d.lineWidth = 1;
+                    ctx2d.stroke();
+                  }
+                }
+              }
             }
             requestAnimationFrame(drawWebcamFrame);
           }
@@ -1548,8 +1690,8 @@
         const now = performance.now();
         const seekThrottle = svlPinchOverride ? 16 : 30;
         if (svlDur && isFinite(svlDur) && svlDur > 0 && svlVideo && !svlVideo.seeking && now - svlLastSeekTime > seekThrottle) {
-          // INVERT: p=0 → t=end (assembled), p=1 → t=0 (disassembled)
-          const target = Math.max(0.01, Math.min(svlDur - 0.04, (1 - p) * svlDur - 0.04));
+          // NO INVERT: p=0 → t=0 (assembled), p=1 → t=end (disassembled)
+          const target = Math.max(0.01, Math.min(svlDur - 0.04, p * svlDur));
           if (Math.abs(target - svlLastSeek) > 0.005) {
             svlVideo.currentTime = target;
             svlLastSeek = target;
@@ -2449,9 +2591,8 @@
         svlCurrent = 0;
         svlLastSeek= -1;
         svlEntered = false;
-        if (scrollVideoLogo && svlDur) {
-          const initTime = SVL_INVERT ? svlDur - 0.05 : 0.02;
-          scrollVideoLogo.currentTime = initTime;
+        if (svlVideo && svlDur) {
+          svlVideo.currentTime = 0.01;
         }
       }
     }

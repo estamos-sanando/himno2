@@ -344,11 +344,7 @@ export default function App() {
       {/* ── Intro ── */}
       {showIntro && (
         <div className="intro-overlay" style={{ padding: 0 }}>
-          <ScrollVideoLogo
-            onStart={handleStart}
-            handLandmarks={introLandmarks}
-            webcamVideoRef={introVideoRef}
-          />
+          <ScrollVideoLogo onStart={handleStart} handLandmarks={introLandmarks} webcamVideoRef={introVideoRef} />
         </div>
       )}
 

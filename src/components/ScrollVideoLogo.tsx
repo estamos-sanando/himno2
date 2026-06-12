@@ -1,37 +1,25 @@
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useCallback, useState } from "react";
 import type { HandLandmarkerResult } from "@mediapipe/tasks-vision";
 
 interface ScrollVideoLogoProps {
   onStart: () => void;
   /** Live MediaPipe hand landmarks — pinch gesture controls shield assembly */
   handLandmarks?: HandLandmarkerResult | null;
-  /**
-   * The hidden video element that feeds MediaPipe during intro.
-   * We reuse it here to show a small live webcam preview in the corner.
-   */
   webcamVideoRef?: React.RefObject<HTMLVideoElement | null>;
 }
 
-/**
- * Video direction (confirmed from TouchDesigner output):
- *   t = 0        → escudo DESARMADO (piezas separadas)
- *   t = duration → escudo ARMADO (completo)
- *
- * Therefore INVERT = true:
- *   progress 0  → t=end  → shield ASSEMBLED (closed pinch / start state)
- *   progress 1  → t=0    → shield DISASSEMBLED (open fingers)
- */
-const INVERT = true;
-
-// Pinch distance thresholds (normalised MediaPipe space ~0..1)
-const PINCH_CLOSED = 0.04; // fingers touching  → progress 0 → assembled
-const PINCH_OPEN   = 0.22; // fingers spread     → progress 1 → disassembled
+// Pinch distance thresholds (normalised MediaPipe space)
+// Closed fist / pinch → PINCH_CLOSED  → progress 0 → video at t=0  (shield assembled)
+// Spread fingers       → PINCH_OPEN   → progress 1 → video at end  (shield disassembled)
+const PINCH_CLOSED = 0.04;
+const PINCH_OPEN   = 0.22;
 
 export default function ScrollVideoLogo({ onStart, handLandmarks, webcamVideoRef }: ScrollVideoLogoProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const videoRef     = useRef<HTMLVideoElement>(null);
   const webcamCanvasRef = useRef<HTMLCanvasElement>(null);
 
-  const targetProg   = useRef(0);   // 0 = assembled, 1 = disassembled
+  const targetProg   = useRef(0);   // 0 = assembled (t=0), 1 = disassembled (t=end)
   const currentProg  = useRef(0);
   const lastSeekT    = useRef(-1);
   const lastSeekTime = useRef(0);
@@ -40,10 +28,54 @@ export default function ScrollVideoLogo({ onStart, handLandmarks, webcamVideoRef
   const videoReady   = useRef(false);
   const primedRef    = useRef(false);
 
-  // Pinch bar width for the UI indicator (0-100)
-  const pinchBarRef  = useRef<HTMLDivElement>(null);
+  const [tdConnected, setTdConnected] = useState(false);
+  const socketRef = useRef<WebSocket | null>(null);
 
-  // Mirror latest landmarks into a ref for the rAF loop
+  // WebSocket connection to TouchDesigner with auto-reconnect
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const port = urlParams.get("tdPort") || "9980";
+    const wsUrl = `ws://localhost:${port}`;
+    let reconnectTimeout: number;
+    let active = true;
+
+    function connect() {
+      if (!active) return;
+      console.log(`Connecting to TouchDesigner WebSocket: ${wsUrl}...`);
+      const ws = new WebSocket(wsUrl);
+      socketRef.current = ws;
+
+      ws.onopen = () => {
+        if (!active) { ws.close(); return; }
+        console.log("TouchDesigner WebSocket Connected! 🔗");
+        setTdConnected(true);
+      };
+
+      ws.onclose = () => {
+        setTdConnected(false);
+        socketRef.current = null;
+        if (active) {
+          reconnectTimeout = window.setTimeout(connect, 3000);
+        }
+      };
+
+      ws.onerror = () => {
+        // ws.close() triggers onclose
+      };
+    }
+
+    connect();
+
+    return () => {
+      active = false;
+      clearTimeout(reconnectTimeout);
+      if (socketRef.current) {
+        socketRef.current.close();
+      }
+    };
+  }, []);
+
+  // Always keep latest landmarks accessible in the rAF loop without closure stale value
   const landmarksRef = useRef<HandLandmarkerResult | null>(null);
   useEffect(() => {
     landmarksRef.current = handLandmarks ?? null;
@@ -55,16 +87,13 @@ export default function ScrollVideoLogo({ onStart, handLandmarks, webcamVideoRef
     if (videoRef.current) videoRef.current.style.opacity = "1";
   }, []);
 
-  /** Prime the hardware decoder so seeks are instant */
+  // Prime the hardware decoder on first hand detection
   const prime = useCallback(() => {
     if (primedRef.current) return;
     primedRef.current = true;
+    revealVideo();
     const v = videoRef.current;
-    if (v) {
-      v.play()
-        .then(() => setTimeout(() => { v.pause(); revealVideo(); }, 80))
-        .catch(() => revealVideo());
-    }
+    if (v) v.play().then(() => setTimeout(() => v.pause(), 40)).catch(() => {});
   }, [revealVideo]);
 
   // ── VIDEO INIT ───────────────────────────────────────────────────────────
@@ -76,12 +105,10 @@ export default function ScrollVideoLogo({ onStart, handLandmarks, webcamVideoRef
       const dur = video.duration;
       if (!dur || !isFinite(dur) || dur <= 0) return;
       durRef.current = dur;
-
-      // INVERT=true → start near the END (assembled shield)
-      const initT = Math.max(0.01, dur - 0.08);
+      // Start at t=0 → shield assembled
       video.addEventListener("seeked", revealVideo, { once: true });
-      video.currentTime = initT;
-      lastSeekT.current = initT;
+      video.currentTime = 0.01;
+      lastSeekT.current = 0.01;
     };
 
     video.addEventListener("loadeddata",     setup, { once: true });
@@ -95,35 +122,7 @@ export default function ScrollVideoLogo({ onStart, handLandmarks, webcamVideoRef
     };
   }, [revealVideo]);
 
-  // ── WEBCAM MIRROR → CANVAS ───────────────────────────────────────────────
-  // Draw the intro webcam feed into a small canvas for the mini-preview
-  useEffect(() => {
-    const canvas = webcamCanvasRef.current;
-    if (!canvas || !webcamVideoRef) return;
-
-    let active = true;
-    const drawFrame = () => {
-      if (!active) return;
-      const vid = webcamVideoRef.current;
-      const ctx = canvas.getContext("2d");
-      if (vid && ctx && vid.readyState >= 2) {
-        canvas.width  = vid.videoWidth  || 320;
-        canvas.height = vid.videoHeight || 240;
-        // Mirror horizontally (natural mirror effect)
-        ctx.save();
-        ctx.scale(-1, 1);
-        ctx.translate(-canvas.width, 0);
-        ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
-        ctx.restore();
-      }
-      requestAnimationFrame(drawFrame);
-    };
-    requestAnimationFrame(drawFrame);
-
-    return () => { active = false; };
-  }, [webcamVideoRef]);
-
-  // ── rAF LOOP ─────────────────────────────────────────────────────────────
+  // ── rAF LOOP — pinch gesture is the ONLY input ───────────────────────────
   useEffect(() => {
     const tick = () => {
       const lmResult = landmarksRef.current;
@@ -144,78 +143,139 @@ export default function ScrollVideoLogo({ onStart, handLandmarks, webcamVideoRef
         }
 
         if (bestPinch !== null) {
-          /**
-           * pinchNorm = 0 → dedos juntos  → progress 0 → INVERT → t=end → ARMADO ✓
-           * pinchNorm = 1 → dedos abiertos → progress 1 → INVERT → t=0  → DESARMADO ✓
-           */
-          const pinchNorm = Math.max(0, Math.min(1,
+          // Map distance → normalised progress [0..1]
+          // 0 = closed pinch = assembled (t=0)
+          // 1 = open spread  = disassembled (t=end)
+          const normalised = Math.max(0, Math.min(1,
             (bestPinch - PINCH_CLOSED) / (PINCH_OPEN - PINCH_CLOSED)
           ));
-          targetProg.current = pinchNorm;
+          targetProg.current = normalised;
           pinchActive = true;
           prime(); // warm decoder on first detection
         }
       }
 
-      // Dynamic duration poll (for browsers that don't fire loadedmetadata before play)
+      // Draw floating webcam preview
+      const webcamCanvas = webcamCanvasRef.current;
+      const webcamVideo = webcamVideoRef?.current;
+      if (webcamCanvas && webcamVideo && webcamVideo.readyState >= 2) {
+        const ctx = webcamCanvas.getContext("2d");
+        if (ctx) {
+          if (webcamCanvas.width !== 320) {
+            webcamCanvas.width = 320;
+            webcamCanvas.height = 240;
+          }
+          ctx.save();
+          ctx.scale(-1, 1);
+          ctx.translate(-webcamCanvas.width, 0);
+          ctx.drawImage(webcamVideo, 0, 0, webcamCanvas.width, webcamCanvas.height);
+          ctx.restore();
+
+          // Draw skeleton & dots
+          if (lmResult && lmResult.landmarks && lmResult.landmarks.length > 0) {
+            const mx = (x: number) => (1 - x) * webcamCanvas.width;
+            const my = (y: number) => y * webcamCanvas.height;
+            const CONNECTIONS = [
+              [0,1],[1,2],[2,3],[3,4],
+              [0,5],[5,6],[6,7],[7,8],
+              [5,9],[9,10],[10,11],[11,12],
+              [9,13],[13,14],[14,15],[15,16],
+              [13,17],[0,17],[17,18],[18,19],[19,20],
+            ] as const;
+
+            for (const marks of lmResult.landmarks) {
+              if (marks.length < 21) continue;
+
+              // Connections
+              ctx.lineWidth = 1.5;
+              ctx.strokeStyle = "#74ACDF"; // Celestial Blue
+              ctx.globalAlpha = 0.8;
+              for (const [a, b] of CONNECTIONS) {
+                ctx.beginPath();
+                ctx.moveTo(mx(marks[a].x), my(marks[a].y));
+                ctx.lineTo(mx(marks[b].x), my(marks[b].y));
+                ctx.stroke();
+              }
+
+              // Joints
+              ctx.globalAlpha = 1.0;
+              for (let i = 0; i < marks.length; i++) {
+                const pt = marks[i];
+                ctx.beginPath();
+                ctx.arc(mx(pt.x), my(pt.y), 3, 0, Math.PI * 2);
+                ctx.fillStyle = "#ffffff";
+                ctx.fill();
+                ctx.strokeStyle = "#74ACDF";
+                ctx.lineWidth = 1;
+                ctx.stroke();
+              }
+            }
+          }
+        }
+      }
+
+      // Dynamic duration poll
       const v = videoRef.current;
       if (v && (!durRef.current || !isFinite(durRef.current) || durRef.current <= 0)) {
         const d = v.duration;
         if (d && !isNaN(d) && isFinite(d) && d > 0) {
           durRef.current = d;
-          const initT = Math.max(0.01, d - 0.08);
-          v.currentTime = initT;
-          lastSeekT.current = initT;
+          v.currentTime = 0.01;
+          lastSeekT.current = 0.01;
           revealVideo();
         }
       }
 
       const diff = targetProg.current - currentProg.current;
       if (Math.abs(diff) > 0.0001) {
+        // Tighter lerp when pinch active for crisp real-time response
         currentProg.current += diff * (pinchActive ? 0.20 : 0.09);
         currentProg.current  = Math.max(0, Math.min(1, currentProg.current));
         const p = currentProg.current;
 
-        // Update pinch bar UI
-        if (pinchBarRef.current) {
-          pinchBarRef.current.style.width = `${p * 100}%`;
-        }
-
+        // Seek video: p=0 → t=0 (assembled), p=1 → t=end (disassembled)
         const dur = durRef.current;
         const now = performance.now();
-        const seekThrottle = pinchActive ? 16 : 30;
-
+        const seekThrottle = pinchActive ? 16 : 30; // 60fps seeks when hand active
         if (dur && isFinite(dur) && dur > 0 && v && !v.seeking && now - lastSeekTime.current > seekThrottle) {
-          // INVERT=true: p=0 → t=end (assembled), p=1 → t=0 (disassembled)
-          const mapped  = Math.max(0.01, (1 - p) * dur - 0.04);
-          const clamped = Math.max(0.01, Math.min(dur - 0.04, mapped));
-
-          if (Math.abs(clamped - lastSeekT.current) > 0.005) {
-            v.currentTime    = clamped;
-            lastSeekT.current = clamped;
+          const target  = Math.max(0.01, Math.min(dur - 0.04, p * dur));
+          if (Math.abs(target - lastSeekT.current) > 0.005) {
+            v.currentTime    = target;
+            lastSeekT.current = target;
             lastSeekTime.current = now;
           }
         }
+      }
+
+      // Send WebSocket update to TouchDesigner if connected
+      const ws = socketRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          event: "pinch",
+          progress: currentProg.current,
+          handVisible: pinchActive
+        }));
       }
 
       rafId.current = requestAnimationFrame(tick);
     };
     rafId.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId.current);
-  }, [revealVideo, prime]);
+  }, [revealVideo, prime, webcamVideoRef]);
 
   // ── RENDER ───────────────────────────────────────────────────────────────
-  const handVisible = !!(handLandmarks?.landmarks && handLandmarks.landmarks.length > 0);
+  const handVisible = !!(handLandmarks && handLandmarks.landmarks && handLandmarks.landmarks.length > 0);
 
   return (
     <div
+      ref={containerRef}
       style={{
         position: "absolute", inset: 0, overflow: "hidden",
         userSelect: "none", WebkitUserSelect: "none",
-        background: "#000000", // pure black required for mix-blend-mode: screen
+        background: "#000", // pure black so mix-blend-mode:screen works perfectly
       }}
     >
-      {/* Shield video — mix-blend-mode:screen removes TouchDesigner black background */}
+      {/* Video del escudo — mix-blend-mode:screen elimina el fondo negro de TouchDesigner */}
       <video
         ref={videoRef}
         src="/logo.mp4"
@@ -225,152 +285,178 @@ export default function ScrollVideoLogo({ onStart, handLandmarks, webcamVideoRef
         style={{
           position: "absolute", inset: 0, width: "100%", height: "100%",
           objectFit: "contain", objectPosition: "center",
-          pointerEvents: "none", zIndex: 2, opacity: 0,
-          transition: "opacity 0.8s ease",
+          pointerEvents: "none", zIndex: 3, opacity: 0,
+          transition: "opacity 0.6s ease",
           willChange: "transform", transform: "translateZ(0)",
           mixBlendMode: "screen",
         }}
       />
 
-      {/* Vignette */}
+      {/* Subtle vignette to frame the shield */}
       <div style={{
-        position: "absolute", inset: 0, zIndex: 3, pointerEvents: "none",
-        background: "radial-gradient(ellipse 80% 80% at 50% 50%, transparent 30%, rgba(0,0,0,0.7) 100%)",
+        position: "absolute", inset: 0, zIndex: 4, pointerEvents: "none",
+        background: "radial-gradient(ellipse 80% 80% at 50% 50%, transparent 35%, rgba(0,0,0,0.85) 100%)",
       }} />
 
-      {/* ── MINI WEBCAM PREVIEW (bottom-right corner) ───────────────────── */}
+      {/* TouchDesigner Connection Status Indicator (top-right) */}
       <div style={{
         position: "absolute",
-        bottom: "clamp(100px, 14vh, 140px)",
-        right: "clamp(16px, 2.5vw, 32px)",
-        zIndex: 10,
-        width: "clamp(120px, 16vw, 200px)",
-        aspectRatio: "4/3",
-        borderRadius: "12px",
-        overflow: "hidden",
-        border: "1px solid rgba(116,172,223,0.4)",
-        boxShadow: "0 0 20px rgba(116,172,223,0.15), 0 4px 24px rgba(0,0,0,0.6)",
-        opacity: 0.75,
-        transition: "opacity 0.3s ease, border-color 0.3s ease",
-        background: "#0a0f1a",
-        ...(handVisible && {
-          opacity: 0.92,
-          borderColor: "rgba(116,172,223,0.7)",
-          boxShadow: "0 0 24px rgba(116,172,223,0.35), 0 4px 24px rgba(0,0,0,0.6)",
-        }),
+        top: "clamp(20px, 3.5vh, 40px)",
+        right: "clamp(20px, 3.5vw, 40px)",
+        zIndex: 8,
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        background: "rgba(0, 0, 0, 0.4)",
+        backdropFilter: "blur(8px)",
+        padding: "8px 16px",
+        borderRadius: "20px",
+        border: "1px solid rgba(116, 172, 223, 0.25)",
+        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.5)",
+        pointerEvents: "none",
+        transition: "border-color 0.4s ease",
       }}>
-        {/* Live webcam canvas */}
-        <canvas
-          ref={webcamCanvasRef}
-          style={{
-            width: "100%", height: "100%",
-            objectFit: "cover",
-            display: "block",
-          }}
-        />
-
-        {/* Hand detection glow overlay when hand is detected */}
-        {handVisible && (
-          <div style={{
-            position: "absolute", inset: 0,
-            background: "radial-gradient(ellipse at center, rgba(116,172,223,0.08) 0%, transparent 70%)",
-            pointerEvents: "none",
-          }} />
-        )}
-
-        {/* Label */}
         <div style={{
-          position: "absolute", bottom: 0, left: 0, right: 0,
-          padding: "4px 8px",
-          background: "linear-gradient(transparent, rgba(0,0,0,0.7))",
-          color: handVisible ? "#74acdf" : "rgba(255,255,255,0.4)",
-          fontSize: "9px",
+          width: "8px",
+          height: "8px",
+          borderRadius: "50%",
+          background: tdConnected ? "#74acdf" : "#ffffff",
+          boxShadow: tdConnected 
+            ? "0 0 8px #74acdf, 0 0 16px #74acdf" 
+            : "0 0 4px rgba(255, 255, 255, 0.4)",
+          opacity: tdConnected ? 1 : 0.4,
+          animation: tdConnected ? "none" : "svl-dot-blink 1.5s infinite alternate",
+        }} />
+        <span style={{
+          color: tdConnected ? "#ffffff" : "rgba(255, 255, 255, 0.5)",
+          fontSize: "11px",
           fontWeight: 700,
           letterSpacing: "1.5px",
           textTransform: "uppercase",
-          textAlign: "center",
-          transition: "color 0.3s ease",
+          fontFamily: "inherit",
+          textShadow: tdConnected ? "0 0 8px rgba(116, 172, 223, 0.3)" : "none",
+          transition: "color 0.4s ease",
         }}>
-          {handVisible ? "✋ Mano detectada" : "Cámara"}
-        </div>
+          {tdConnected ? "TD Link: Conectado" : "TD Link: Desconectado"}
+        </span>
       </div>
 
-      {/* ── STATUS HINT (top-center) ───────────────────────────────────── */}
+      {/* Hand detection status indicator (top-center) */}
       <div style={{
         position: "absolute",
-        top: "clamp(18px, 3vh, 36px)",
+        top: "clamp(20px, 3.5vh, 40px)",
         left: "50%",
         transform: "translateX(-50%)",
         zIndex: 8,
-        color: handVisible ? "rgba(116,172,223,0.95)" : "rgba(116,172,223,0.4)",
-        fontSize: "clamp(9px, 1.3vw, 12px)",
+        color: handVisible ? "rgba(116,172,223,0.9)" : "rgba(116,172,223,0.35)",
+        fontSize: "clamp(10px, 1.4vw, 13px)",
         fontWeight: 700,
         letterSpacing: "2.5px",
         textTransform: "uppercase",
-        textShadow: handVisible ? "0 0 18px rgba(116,172,223,0.8)" : "none",
+        textShadow: handVisible ? "0 0 16px rgba(116,172,223,0.7)" : "none",
         pointerEvents: "none",
-        transition: "all 0.5s ease",
+        transition: "all 0.4s ease",
         whiteSpace: "nowrap",
       }}>
         {handVisible
-          ? "🤏 Cerrá los dedos para armar · Abrí para desarmar"
-          : "Mostrá tu mano a la cámara"}
+          ? "✋ Mano detectada — abrí o cerrá los dedos"
+          : "Mostrá la mano a la cámara"}
       </div>
 
-      {/* ── PINCH PROGRESS BAR (below status) ──────────────────────────── */}
+      {/* Pinch visualizer — small indicator at bottom showing current pinch level */}
       <div style={{
         position: "absolute",
-        top: "clamp(42px, 6.5vh, 68px)",
+        bottom: "clamp(100px, 16vh, 160px)",
         left: "50%",
         transform: "translateX(-50%)",
         zIndex: 8,
-        width: "clamp(100px, 14vw, 180px)",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        gap: "5px",
+        gap: "8px",
+        pointerEvents: "none",
         opacity: handVisible ? 1 : 0,
         transition: "opacity 0.4s ease",
-        pointerEvents: "none",
       }}>
         <div style={{
-          width: "100%",
-          height: "3px",
+          width: "120px",
+          height: "4px",
           borderRadius: "2px",
-          background: "rgba(116,172,223,0.15)",
-          border: "1px solid rgba(116,172,223,0.25)",
+          background: "rgba(116,172,223,0.2)",
+          border: "1px solid rgba(116,172,223,0.3)",
           overflow: "hidden",
         }}>
-          <div
-            ref={pinchBarRef}
-            style={{
-              height: "100%",
-              width: "0%",
-              background: "linear-gradient(90deg, #74acdf 0%, #ffffff 100%)",
-              borderRadius: "2px",
-              transition: "width 0.05s linear",
-            }}
-          />
+          <div style={{
+            height: "100%",
+            width: `${currentProg.current * 100}%`,
+            background: "linear-gradient(90deg, #74acdf, #ffffff)",
+            borderRadius: "2px",
+            transition: "width 0.05s linear",
+          }} />
         </div>
-        <div style={{
-          display: "flex", justifyContent: "space-between",
-          width: "100%",
-          color: "rgba(116,172,223,0.5)",
-          fontSize: "8px",
-          letterSpacing: "1px",
+        <span style={{
+          fontSize: "9px",
+          letterSpacing: "2px",
+          color: "rgba(116,172,223,0.6)",
+          textTransform: "uppercase",
           fontWeight: 700,
         }}>
-          <span>🤏 ARMADO</span>
-          <span>DESARMADO ✋</span>
-        </div>
+          🤏 ← cerrar · abrir → ✋
+        </span>
       </div>
 
-      {/* ── INGRESAR BUTTON ─────────────────────────────────────────────── */}
+      {/* Mini webcam preview (bottom-right corner) */}
+      {webcamVideoRef && (
+        <div style={{
+          position: "absolute",
+          bottom: "clamp(100px, 14vh, 140px)",
+          right: "clamp(16px, 2.5vw, 32px)",
+          width: "clamp(120px, 16vw, 200px)",
+          aspectRatio: "4/3",
+          borderRadius: "12px",
+          border: `1px solid ${handVisible ? "rgba(116,172,223,0.7)" : "rgba(116,172,223,0.4)"}`,
+          boxShadow: "0 0 20px rgba(116,172,223,0.15), 0 4px 24px rgba(0,0,0,0.6)",
+          opacity: handVisible ? 0.92 : 0.75,
+          zIndex: 10,
+          background: "#0a0f1a",
+          overflow: "hidden",
+          transition: "border-color 0.4s ease, opacity 0.4s ease",
+        }}>
+          <canvas
+            ref={webcamCanvasRef}
+            style={{
+              width: "100%",
+              height: "100%",
+              display: "block",
+            }}
+          />
+          <div style={{
+            position: "absolute",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            padding: "4px 8px",
+            color: handVisible ? "#74acdf" : "rgba(255,255,255,0.4)",
+            fontSize: "9px",
+            fontWeight: 700,
+            letterSpacing: "1.5px",
+            textTransform: "uppercase",
+            textAlign: "center",
+            background: "rgba(0, 0, 0, 0.5)",
+            backdropFilter: "blur(4px)",
+            transition: "color 0.4s ease",
+          }}>
+            {handVisible ? "✋ Mano detectada" : "Cámara"}
+          </div>
+        </div>
+      )}
+
+      {/* Ingresar button */}
       <button
         onClick={onStart}
         style={{
           position: "absolute",
-          bottom: "clamp(28px, 6vh, 60px)",
+          bottom: "clamp(30px, 7vh, 70px)",
           left: "50%",
           transform: "translateX(-50%)",
           zIndex: 10,
@@ -413,6 +499,10 @@ export default function ScrollVideoLogo({ onStart, handLandmarks, webcamVideoRef
         @keyframes svl-btn-pulse {
           0%   { box-shadow: 0 0 20px rgba(116,172,223,0.2), inset 0 0 10px rgba(116,172,223,0.1); }
           100% { box-shadow: 0 0 30px rgba(116,172,223,0.4), inset 0 0 15px rgba(116,172,223,0.2); }
+        }
+        @keyframes svl-dot-blink {
+          0%   { opacity: 0.15; }
+          100% { opacity: 0.6; }
         }
       `}</style>
     </div>
