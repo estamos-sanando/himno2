@@ -894,32 +894,27 @@
     <!-- Patriotic flag banner -->
     <div class="patriotic-banner"></div>
 
-    <!-- Intro Overlay (Fullscreen Visual Motion v5) -->
+    <!-- Intro Overlay v7 -->
     <div id="intro-overlay" class="intro-overlay">
       <div id="scroll-video-container" class="scroll-video-logo-container">
-        <!-- Cinematic bg -->
+        <!-- Background -->
         <div class="svl-bg"></div>
         <!-- Argentine flag bands -->
-        <div class="svl-band" style="top:0; animation: svl-band 4s ease-in-out infinite;"></div>
-        <div class="svl-band" style="bottom:0; animation: svl-band 4s ease-in-out 0.5s infinite;"></div>
-        <!-- Video -->
-        <video id="scroll-video-logo" src="logo.mp4" muted playsinline preload="auto"></video>
+        <div class="svl-band" style="top:0;animation:svl-band 4s ease-in-out infinite;"></div>
+        <div class="svl-band" style="bottom:0;animation:svl-band 4s ease-in-out 0.5s infinite;"></div>
+        <!-- Static shield fallback (always visible, used if video fails) -->
+        <img id="svl-shield-img" src="escudo-argentino.png" alt="Escudo" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center;z-index:2;opacity:0;transition:opacity 0.6s ease;filter:drop-shadow(0 0 40px rgba(116,172,223,0.5)) drop-shadow(0 0 80px rgba(116,172,223,0.2));pointer-events:none;" />
+        <!-- Video (loads over the image) -->
+        <video id="scroll-video-logo" muted playsinline preload="auto" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:center;z-index:3;opacity:0;transition:opacity 0.6s ease;pointer-events:none;will-change:transform;transform:translateZ(0);"></video>
         <!-- Vignette -->
         <div class="svl-vignette"></div>
         <!-- Scroll indicator -->
-        <div id="scroll-prompt" style="position:absolute;bottom:clamp(22px,4.5vh,48px);left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:10px;pointer-events:none;z-index:6;color:#74acdf;transition:opacity 0.3s ease;">
+        <div id="scroll-prompt" style="position:absolute;bottom:clamp(22px,4.5vh,48px);left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:10px;pointer-events:none;z-index:6;color:#74acdf;transition:opacity 0.3s ease;opacity:0;">
           <div style="width:20px;height:32px;border:2px solid rgba(116,172,223,0.8);border-radius:12px;display:flex;justify-content:center;padding-top:6px;box-sizing:border-box;box-shadow:0 0 12px rgba(116,172,223,0.4);">
             <div style="width:4px;height:7px;border-radius:3px;background:#74acdf;box-shadow:0 0 6px #74acdf;animation:svl-wheel 1.5s ease-in-out infinite;"></div>
           </div>
           <span style="font-size:clamp(9px,1.6vw,11px);font-weight:700;letter-spacing:2.5px;text-transform:uppercase;text-align:center;text-shadow:0 0 16px rgba(116,172,223,0.8);white-space:nowrap;">Desplaza para ingresar a la web</span>
         </div>
-        <!-- Loading overlay -->
-        <div id="svl-loading" class="svl-loading-overlay">
-          <div class="svl-spinner"></div>
-          <span style="color:rgba(116,172,223,0.7);font-size:12px;letter-spacing:3px;text-transform:uppercase;">Cargando escudo&hellip;</span>
-        </div>
-      </div>
-    </div>
       </div>
     </div>
 
@@ -1195,104 +1190,129 @@
     const btnStartIntro = document.getElementById("btn-start-intro");
     const btnPlayToggle = document.getElementById("btn-play-toggle");
 
-    // ── SCROLL-DRIVEN VIDEO LOGO SYSTEM v6 (no autoplay) ──
-    const scrollVideoContainer = document.getElementById("scroll-video-container");
-    const scrollVideoLogo      = document.getElementById("scroll-video-logo");
-    const scrollPrompt         = document.getElementById("scroll-prompt");
-    const svlLoadingEl         = document.getElementById("svl-loading");
+    // ── SCROLL-DRIVEN VIDEO LOGO SYSTEM v7 ──
+    const svlVideo    = document.getElementById("scroll-video-logo");
+    const svlImg      = document.getElementById("svl-shield-img");
+    const svlPrompt   = document.getElementById("scroll-prompt");
 
     let svlTarget   = 0;
     let svlCurrent  = 0;
     let svlDur      = 0;
     let svlLastSeek = -1;
     let svlEntered  = false;
-    const SVL_INVERT = true;  // end of video = assembled shield
 
-    let svlLoaderHidden = false;
-    function svlHideLoader() {
-      if (svlLoaderHidden) return;
-      svlLoaderHidden = true;
-      if (!svlLoadingEl) return;
-      svlLoadingEl.style.opacity = "0";
-      setTimeout(() => { if (svlLoadingEl) svlLoadingEl.style.display = "none"; }, 500);
+    // Show the static shield image immediately as fallback
+    if (svlImg) {
+      setTimeout(() => { svlImg.style.opacity = "1"; }, 100);
+    }
+    // Show scroll indicator
+    if (svlPrompt) {
+      setTimeout(() => { svlPrompt.style.opacity = "1"; }, 300);
     }
 
-    // Hard fallback — always hide loader after 2 s
-    const svlFallback = setTimeout(svlHideLoader, 2000);
+    // Set video src dynamically (avoids relative-path issues)
+    if (svlVideo) {
+      const base = window.location.href.replace(/[^/]*$/, '');
+      svlVideo.src = base + 'logo.mp4';
+    }
 
-    function svlSetup() {
-      svlDur = scrollVideoLogo.duration;
-      if (!svlDur || isNaN(svlDur)) return;
-      const initT = SVL_INVERT ? Math.max(0.01, svlDur - 0.08) : 0.02;
-      // Hide loader once the frame is decoded
-      scrollVideoLogo.addEventListener("seeked", svlHideLoader, { once: true });
-      scrollVideoLogo.currentTime = initT;
+    function svlRevealVideo() {
+      if (!svlVideo) return;
+      svlVideo.style.opacity = "1"; // video fades in over the shield image
+    }
+
+    function svlSetFrame() {
+      if (!svlVideo || !svlVideo.duration || isNaN(svlVideo.duration)) return;
+      svlDur = svlVideo.duration;
+      // Show end of video (assembled shield) — SVL_INVERT = true
+      const initT = Math.max(0.01, svlDur - 0.08);
+      svlVideo.addEventListener("seeked", svlRevealVideo, { once: true });
+      svlVideo.currentTime = initT;
       svlLastSeek = initT;
     }
 
-    scrollVideoLogo.addEventListener("loadeddata",     svlSetup, { once: true });
-    scrollVideoLogo.addEventListener("loadedmetadata", svlSetup, { once: true });
-    if (scrollVideoLogo.readyState >= 2) svlSetup();
-    else if (scrollVideoLogo.readyState >= 1) svlSetup();
+    if (svlVideo) {
+      svlVideo.addEventListener("loadeddata",     svlSetFrame, { once: true });
+      svlVideo.addEventListener("loadedmetadata", svlSetFrame, { once: true });
+      svlVideo.addEventListener("error", () => {
+        // Video failed — keep the static image, that's fine
+        console.warn("SVL: video failed, using static image");
+      });
+      if (svlVideo.readyState >= 2) svlSetFrame();
+      else if (svlVideo.readyState >= 1) svlSetFrame();
+    }
 
-    // Wheel + touch
+    // Input handlers
     let svlPrimed = false;
     function svlPrime() {
-      if (svlPrimed) return;
+      if (svlPrimed || !svlVideo) return;
       svlPrimed = true;
-      scrollVideoLogo.play().then(() => {
-        setTimeout(() => scrollVideoLogo.pause(), 40);
+      svlVideo.play().then(() => {
+        setTimeout(() => svlVideo.pause(), 40);
       }).catch(() => {});
     }
 
-    if (introOverlay) {
-      introOverlay.addEventListener("wheel", (e) => {
+    const introOverlayEl = document.getElementById("intro-overlay");
+    if (introOverlayEl) {
+      introOverlayEl.addEventListener("wheel", (e) => {
         e.preventDefault();
         svlPrime();
         const norm  = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
         const speed = Math.min(Math.abs(e.deltaY), 100) / 100;
-        svlTarget = Math.max(0, Math.min(1, svlTarget + norm * speed * 0.022));
+        svlTarget = Math.max(0, Math.min(1, svlTarget + norm * speed * 0.025));
       }, { passive: false });
 
       let svlLastTY = 0;
-      introOverlay.addEventListener("touchstart", (e) => {
+      introOverlayEl.addEventListener("touchstart", (e) => {
         if (e.touches.length === 1) { svlLastTY = e.touches[0].clientY; svlPrime(); }
       }, { passive: true });
-      introOverlay.addEventListener("touchmove", (e) => {
+      introOverlayEl.addEventListener("touchmove", (e) => {
         if (e.touches.length !== 1) return;
         e.preventDefault();
-        const dy    = svlLastTY - e.touches[0].clientY;
-        svlLastTY   = e.touches[0].clientY;
-        const delta = (dy / window.innerHeight) * 2.0;
-        svlTarget   = Math.max(0, Math.min(1, svlTarget + delta));
+        const dy = svlLastTY - e.touches[0].clientY;
+        svlLastTY = e.touches[0].clientY;
+        svlTarget = Math.max(0, Math.min(1, svlTarget + (dy / window.innerHeight) * 2.0));
       }, { passive: false });
+
+      // Click/tap anywhere also progresses (for mobile that can't scroll)
+      introOverlayEl.addEventListener("click", () => {
+        svlTarget = Math.min(1, svlTarget + 0.15);
+      });
     }
 
     function svlTick() {
-      if (svlDur) {
-        const diff = svlTarget - svlCurrent;
-        if (Math.abs(diff) > 0.0003) {
-          svlCurrent += diff * 0.09;
-          svlCurrent  = Math.max(0, Math.min(1, svlCurrent));
-          const p = svlCurrent;
-          const mapped  = SVL_INVERT
-            ? Math.max(0.01, (1 - p) * svlDur - 0.08)
-            : Math.min(svlDur - 0.04, p * svlDur + 0.02);
-          const clamped = Math.max(0.01, Math.min(svlDur - 0.04, mapped));
+      const diff = svlTarget - svlCurrent;
+      if (Math.abs(diff) > 0.0003) {
+        svlCurrent += diff * 0.09;
+        svlCurrent  = Math.max(0, Math.min(1, svlCurrent));
+        const p = svlCurrent;
+
+        if (svlDur && svlVideo) {
+          // INVERT=true: p=0 → end of video (assembled), p=1 → near start (disassembled)
+          const mapped  = Math.max(0.01, (1 - p) * svlDur - 0.04);
+          const clamped = Math.min(svlDur - 0.04, mapped);
           if (Math.abs(clamped - svlLastSeek) > 0.004) {
-            scrollVideoLogo.currentTime = clamped;
+            svlVideo.currentTime = clamped;
             svlLastSeek = clamped;
           }
-          if (scrollPrompt) {
-            scrollPrompt.style.opacity = p < 0.2 ? String(1 - p * 5) : "0";
-          }
-          if (p >= 0.93 && !svlEntered) {
-            svlEntered = true;
-            startExperience();
-          }
+        }
+
+        // Fade img and video together for parallax effect
+        if (svlImg)    svlImg.style.opacity    = String(Math.max(0, 1 - p * 1.5));
+        if (svlVideo)  svlVideo.style.opacity  = svlVideo.src ? String(Math.max(0, 1 - p * 1.5)) : "0";
+
+        if (svlPrompt) {
+          svlPrompt.style.opacity = p < 0.2 ? String(1 - p * 5) : "0";
+        }
+
+        if (p >= 0.93 && !svlEntered) {
+          svlEntered = true;
+          startExperience();
         }
       }
       requestAnimationFrame(svlTick);
+    }
+    requestAnimationFrame(svlTick);
     }
     requestAnimationFrame(svlTick);
     }

@@ -4,17 +4,13 @@ interface ScrollVideoLogoProps {
   onStart: () => void;
 }
 
-/**
- * INVERT = true  → video ends with assembled shield (p=0 shows end, scroll disassembles)
- * INVERT = false → video starts with assembled shield (p=0 shows start, scroll disassembles)
- */
-const INVERT = true;
+const INVERT = true; // end of video = assembled shield
 
 export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef     = useRef<HTMLVideoElement>(null);
-  const loaderRef    = useRef<HTMLDivElement>(null);
-  const indicatorRef = useRef<HTMLDivElement>(null);
+  const imgRef       = useRef<HTMLImageElement>(null);
+  const promptRef    = useRef<HTMLDivElement>(null);
 
   const targetProg  = useRef(0);
   const currentProg = useRef(0);
@@ -23,64 +19,46 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
   const entered     = useRef(false);
   const durRef      = useRef(0);
 
-  // ── VIDEO INIT: no play() required ─────────────────────────────────────
+  // ── IMAGE + VIDEO INIT ───────────────────────────────────────────────────
   useEffect(() => {
+    // 1. Show static shield image immediately (always works, no codec issues)
+    const imgTimer = setTimeout(() => {
+      if (imgRef.current) imgRef.current.style.opacity = "1";
+    }, 80);
+
+    // 2. Show scroll prompt shortly after
+    const promptTimer = setTimeout(() => {
+      if (promptRef.current) promptRef.current.style.opacity = "1";
+    }, 300);
+
+    // 3. Try to load video in the background
     const video = videoRef.current;
     if (!video) return;
-
-    let loaderHidden = false;
-
-    const hideLoader = () => {
-      if (loaderHidden) return;
-      loaderHidden = true;
-      const el = loaderRef.current;
-      if (!el) return;
-      el.style.opacity = "0";
-      setTimeout(() => { if (el) el.style.display = "none"; }, 500);
-    };
-
-    // Hard fallback — always hide loader after 2 s
-    const fallbackTimer = setTimeout(hideLoader, 2000);
 
     const setupVideo = () => {
       const dur = video.duration;
       if (!dur || isNaN(dur)) return;
       durRef.current = dur;
-
-      const initT = INVERT
-        ? Math.max(0.01, dur - 0.08)   // near end = assembled
-        : 0.02;                          // near start = assembled
-
-      // Wait for the frame to actually be decoded before hiding loader
+      const initT = INVERT ? Math.max(0.01, dur - 0.08) : 0.02;
+      // Reveal video once the frame is decoded
       const onSeeked = () => {
-        hideLoader();
-        video.removeEventListener("seeked", onSeeked);
+        if (video.style) video.style.opacity = "1";
       };
-      video.addEventListener("seeked", onSeeked);
+      video.addEventListener("seeked", onSeeked, { once: true });
       video.currentTime = initT;
       lastSeekT.current = initT;
     };
 
-    const onLoaded = () => {
-      setupVideo();
-      video.removeEventListener("loadeddata",     onLoaded);
-      video.removeEventListener("loadedmetadata", onLoaded);
-    };
-
-    video.addEventListener("loadeddata",     onLoaded);
-    video.addEventListener("loadedmetadata", onLoaded);
-
-    // Already buffered?
-    if (video.readyState >= 2) {
-      onLoaded();
-    } else if (video.readyState >= 1) {
-      onLoaded(); // at least metadata
-    }
+    video.addEventListener("loadeddata",     setupVideo, { once: true });
+    video.addEventListener("loadedmetadata", setupVideo, { once: true });
+    if (video.readyState >= 2) setupVideo();
+    else if (video.readyState >= 1) setupVideo();
 
     return () => {
-      clearTimeout(fallbackTimer);
-      video.removeEventListener("loadeddata",     onLoaded);
-      video.removeEventListener("loadedmetadata", onLoaded);
+      clearTimeout(imgTimer);
+      clearTimeout(promptTimer);
+      video.removeEventListener("loadeddata",     setupVideo);
+      video.removeEventListener("loadedmetadata", setupVideo);
     };
   }, []);
 
@@ -89,79 +67,90 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
     const el = containerRef.current;
     if (!el) return;
 
-    // On first user gesture, try to play briefly to help mobile seek
     let primed = false;
-    const tryPrime = () => {
+    const prime = () => {
       if (primed) return;
       primed = true;
       const v = videoRef.current;
-      if (!v || !durRef.current) return;
-      v.play().then(() => {
-        setTimeout(() => v.pause(), 40); // play 40ms then stop
-      }).catch(() => {});
+      if (v && durRef.current) {
+        v.play().then(() => setTimeout(() => v.pause(), 40)).catch(() => {});
+      }
     };
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      tryPrime();
+      prime();
       const norm  = e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
       const speed = Math.min(Math.abs(e.deltaY), 100) / 100;
-      targetProg.current = Math.max(0, Math.min(1, targetProg.current + norm * speed * 0.022));
+      targetProg.current = Math.max(0, Math.min(1, targetProg.current + norm * speed * 0.025));
     };
 
     let lastTY = 0;
     const onTouchStart = (e: TouchEvent) => {
-      if (e.touches.length === 1) { lastTY = e.touches[0].clientY; tryPrime(); }
+      if (e.touches.length === 1) { lastTY = e.touches[0].clientY; prime(); }
     };
     const onTouchMove = (e: TouchEvent) => {
       if (e.touches.length !== 1) return;
       e.preventDefault();
-      const dy    = lastTY - e.touches[0].clientY;
-      lastTY      = e.touches[0].clientY;
-      const delta = (dy / window.innerHeight) * 2.0;
-      targetProg.current = Math.max(0, Math.min(1, targetProg.current + delta));
+      const dy = lastTY - e.touches[0].clientY;
+      lastTY   = e.touches[0].clientY;
+      targetProg.current = Math.max(0, Math.min(1, targetProg.current + (dy / window.innerHeight) * 2.0));
+    };
+    // Click/tap to progress (mobile fallback)
+    const onClick = () => {
+      targetProg.current = Math.min(1, targetProg.current + 0.15);
     };
 
     el.addEventListener("wheel",      onWheel,      { passive: false });
     el.addEventListener("touchstart", onTouchStart, { passive: true  });
     el.addEventListener("touchmove",  onTouchMove,  { passive: false });
+    el.addEventListener("click",      onClick);
     return () => {
       el.removeEventListener("wheel",      onWheel);
       el.removeEventListener("touchstart", onTouchStart);
       el.removeEventListener("touchmove",  onTouchMove);
+      el.removeEventListener("click",      onClick);
     };
   }, []);
 
   // ── rAF LOOP ────────────────────────────────────────────────────────────
   useEffect(() => {
     const tick = () => {
-      const dur = durRef.current;
-      if (dur) {
-        const diff = targetProg.current - currentProg.current;
-        if (Math.abs(diff) > 0.0003) {
-          currentProg.current += diff * 0.09;
-          currentProg.current  = Math.max(0, Math.min(1, currentProg.current));
-          const p = currentProg.current;
+      const diff = targetProg.current - currentProg.current;
+      if (Math.abs(diff) > 0.0003) {
+        currentProg.current += diff * 0.09;
+        currentProg.current  = Math.max(0, Math.min(1, currentProg.current));
+        const p = currentProg.current;
 
+        // Seek video
+        const dur = durRef.current;
+        const v   = videoRef.current;
+        if (dur && v) {
           const mapped  = INVERT
-            ? Math.max(0.02, (1 - p) * dur - 0.08)
-            : Math.min(dur - 0.04, p * dur + 0.02);
+            ? Math.max(0.01, (1 - p) * dur - 0.04)
+            : Math.min(dur - 0.04, p * dur + 0.01);
           const clamped = Math.max(0.01, Math.min(dur - 0.04, mapped));
-
-          const v = videoRef.current;
-          if (v && Math.abs(clamped - lastSeekT.current) > 0.004) {
-            v.currentTime    = clamped;
+          if (Math.abs(clamped - lastSeekT.current) > 0.004) {
+            v.currentTime   = clamped;
             lastSeekT.current = clamped;
           }
+        }
 
-          if (indicatorRef.current) {
-            indicatorRef.current.style.opacity = p < 0.2 ? String(1 - p * 5) : "0";
-          }
+        // Fade both image and video out as user scrolls
+        const opacity = String(Math.max(0, 1 - p * 1.5));
+        if (imgRef.current && imgRef.current.style.opacity !== "0")
+          imgRef.current.style.opacity = opacity;
+        if (v && parseFloat(v.style.opacity || "0") > 0)
+          v.style.opacity = opacity;
 
-          if (p >= 0.93 && !entered.current) {
-            entered.current = true;
-            onStart();
-          }
+        // Fade indicator
+        if (promptRef.current)
+          promptRef.current.style.opacity = p < 0.2 ? String(1 - p * 5) : "0";
+
+        // Auto-enter
+        if (p >= 0.93 && !entered.current) {
+          entered.current = true;
+          onStart();
         }
       }
       rafId.current = requestAnimationFrame(tick);
@@ -176,7 +165,7 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
       ref={containerRef}
       style={{
         position: "absolute", inset: 0, overflow: "hidden",
-        cursor: "ns-resize", userSelect: "none", WebkitUserSelect: "none",
+        cursor: "pointer", userSelect: "none", WebkitUserSelect: "none",
       }}
     >
       {/* Deep space background */}
@@ -187,20 +176,20 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
       }} />
 
       {/* Argentine flag bands */}
-      <div style={{
-        position: "absolute", top: 0, left: 0, right: 0, height: "3px",
-        background: "linear-gradient(90deg, transparent, #74acdf 30%, #fff 50%, #74acdf 70%, transparent)",
-        opacity: 0.55, zIndex: 1, animation: "svl-band 4s ease-in-out infinite",
-      }} />
-      <div style={{
-        position: "absolute", bottom: 0, left: 0, right: 0, height: "3px",
-        background: "linear-gradient(90deg, transparent, #74acdf 30%, #fff 50%, #74acdf 70%, transparent)",
-        opacity: 0.55, zIndex: 1, animation: "svl-band 4s ease-in-out 0.5s infinite",
-      }} />
+      {[0, 1].map(i => (
+        <div key={i} style={{
+          position: "absolute",
+          ...(i === 0 ? { top: 0 } : { bottom: 0 }),
+          left: 0, right: 0, height: "3px",
+          background: "linear-gradient(90deg, transparent, #74acdf 30%, #fff 50%, #74acdf 70%, transparent)",
+          opacity: 0.55, zIndex: 1,
+          animation: `svl-band 4s ease-in-out ${i === 1 ? "0.5s" : "0s"} infinite`,
+        }} />
+      ))}
 
       {/* Particles */}
       <div style={{ position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none" }}>
-        {Array.from({ length: 40 }).map((_, i) => (
+        {Array.from({ length: 35 }).map((_, i) => (
           <div key={i} style={{
             position: "absolute",
             left: `${(i * 37 + 11) % 100}%`,
@@ -208,14 +197,30 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
             width: `${1 + (i % 3)}px`,
             height: `${1 + (i % 3)}px`,
             borderRadius: "50%",
-            background: ["#74acdf", "#ffffff", "#f6b800"][i % 3],
+            background: (["#74acdf", "#ffffff", "#f6b800"] as string[])[i % 3],
             opacity: 0,
             animation: `svl-star ${3 + (i % 5)}s ease-in-out ${(i * 0.3) % 4}s infinite`,
           }} />
         ))}
       </div>
 
-      {/* Video — always opacity 1 — loader overlay sits on top */}
+      {/* Static shield image — shown IMMEDIATELY as fallback */}
+      <img
+        ref={imgRef}
+        src="/escudo-argentino.png"
+        alt="Escudo Nacional Argentino"
+        style={{
+          position: "absolute", inset: 0,
+          width: "100%", height: "100%",
+          objectFit: "contain", objectPosition: "center",
+          zIndex: 2, opacity: 0,
+          transition: "opacity 0.6s ease",
+          pointerEvents: "none",
+          filter: "drop-shadow(0 0 40px rgba(116,172,223,0.5)) drop-shadow(0 0 80px rgba(116,172,223,0.2))",
+        }}
+      />
+
+      {/* Video — loads in background, fades in over image if it works */}
       <video
         ref={videoRef}
         src="/logo.mp4"
@@ -225,7 +230,8 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
         style={{
           position: "absolute", inset: 0, width: "100%", height: "100%",
           objectFit: "contain", objectPosition: "center",
-          pointerEvents: "none", zIndex: 3,
+          pointerEvents: "none", zIndex: 3, opacity: 0,
+          transition: "opacity 0.6s ease",
           willChange: "transform", transform: "translateZ(0)",
         }}
       />
@@ -236,35 +242,9 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
         background: "radial-gradient(ellipse 75% 75% at 50% 48%, transparent 25%, rgba(4,8,16,0.75) 100%)",
       }} />
 
-      {/* Loading overlay — fades out after seeked or 2s timeout */}
-      <div
-        ref={loaderRef}
-        style={{
-          position: "absolute", inset: 0, zIndex: 10,
-          background: "radial-gradient(ellipse 90% 90% at 50% 50%, #0a1628 0%, #040810 100%)",
-          display: "flex", flexDirection: "column",
-          alignItems: "center", justifyContent: "center", gap: "20px",
-          transition: "opacity 0.5s ease",
-        }}
-      >
-        <div style={{
-          width: "60px", height: "60px",
-          border: "3px solid rgba(116,172,223,0.15)",
-          borderTop: "3px solid #74acdf",
-          borderRadius: "50%",
-          animation: "svl-spin 1s linear infinite",
-        }} />
-        <span style={{
-          color: "rgba(116,172,223,0.7)", fontSize: "12px",
-          letterSpacing: "3px", textTransform: "uppercase",
-        }}>
-          Cargando escudo…
-        </span>
-      </div>
-
       {/* Scroll indicator */}
       <div
-        ref={indicatorRef}
+        ref={promptRef}
         style={{
           position: "absolute",
           bottom: "clamp(22px, 4.5vh, 48px)",
@@ -274,7 +254,7 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
           pointerEvents: "none", zIndex: 6,
           color: "#74acdf",
           textShadow: "0 0 14px rgba(116,172,223,0.9)",
-          transition: "opacity 0.3s ease",
+          opacity: 0, transition: "opacity 0.3s ease",
         }}
       >
         <div style={{
@@ -301,7 +281,6 @@ export default function ScrollVideoLogo({ onStart }: ScrollVideoLogoProps) {
       </div>
 
       <style>{`
-        @keyframes svl-spin  { to { transform: rotate(360deg); } }
         @keyframes svl-wheel {
           0%   { opacity: 0; transform: translateY(0); }
           20%  { opacity: 1; }
