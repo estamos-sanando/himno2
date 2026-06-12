@@ -586,12 +586,14 @@
       inset: 0;
       width: 100%;
       height: 100%;
-      object-fit: cover;
+      object-fit: contain;
+      object-position: center;
       pointer-events: none;
       opacity: 0;
-      transition: opacity 0.5s ease;
+      transition: opacity 0.6s ease;
       will-change: transform;
       transform: translateZ(0);
+      background: #050a12;
     }
 
     .scroll-video-logo-container.loaded video {
@@ -862,7 +864,7 @@
           <div class="mouse-icon">
             <div class="mouse-dot"></div>
           </div>
-          <span style="font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;">Desplaza para desarmar</span>
+          <span style="font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;">Desplaza para ingresar a la web</span>
         </div>
 
         <!-- btn-start-intro removed — auto-enter on disassemble -->
@@ -889,6 +891,7 @@
       </div>
 
       <div class="header-actions">
+        <button id="btn-back-intro" class="btn-primary" onclick="backToIntro()" style="margin-right:8px;background:rgba(255,255,255,0.06);color:var(--text-secondary);border:1px solid var(--border-glass);font-size:13px;" title="Volver a la pantalla de inicio">← Inicio</button>
         <button id="btn-instructions" class="btn-primary" style="background: rgba(255, 255, 255, 0.08); color: var(--text-primary); border: 1px solid var(--border-glass); margin-right: 8px;">❓ Ayuda</button>
         <button id="btn-play-toggle" class="btn-primary">▶ Iniciar</button>
       </div>
@@ -1140,82 +1143,92 @@
     const btnStartIntro = document.getElementById("btn-start-intro");
     const btnPlayToggle = document.getElementById("btn-play-toggle");
 
-    // ── SCROLL-DRIVEN VIDEO LOGO SYSTEM (optimised) ──
+    // ── SCROLL-DRIVEN VIDEO LOGO SYSTEM v4 ──
     const scrollVideoContainer = document.getElementById("scroll-video-container");
     const scrollVideoLogo      = document.getElementById("scroll-video-logo");
     const scrollPrompt         = document.getElementById("scroll-prompt");
 
-    let svlTargetProgress  = 0;
-    let svlCurrentProgress = 0;
-    let svlDuration        = 0;
-    let svlLastSeekTime    = -1;
-    let svlEntered         = false;
-    const SVL_INVERT       = true;   // true = starts assembled
-    const SVL_LERP         = 0.10;
-    const SVL_SEEK_THRESH  = 0.003;
-    const SVL_AUTO_ENTER   = 0.97;
+    let svlTarget   = 0;
+    let svlCurrent  = 0;
+    let svlDur      = 0;
+    let svlLastSeek = -1;
+    let svlEntered  = false;
+    const SVL_INVERT    = false;   // false = frame-0 is assembled, scroll disassembles
+    const SVL_LERP      = 0.09;
+    const SVL_SEEK_TH   = 0.003;
+    const SVL_AUTO_ENTER= 0.94;
+
+    function svlShowVideo() {
+      if (scrollVideoLogo.style.opacity === "1") return;
+      scrollVideoLogo.style.opacity = "1";
+      if (scrollVideoContainer) scrollVideoContainer.classList.add("loaded");
+      const ld = scrollVideoContainer && scrollVideoContainer.querySelector(".vml-loading");
+      if (ld) ld.style.display = "none";
+    }
 
     function svlInit() {
-      svlDuration = scrollVideoLogo.duration;
-      const initTime = SVL_INVERT ? svlDuration - 0.04 : 0.01;
+      svlDur = scrollVideoLogo.duration;
+      if (!svlDur || isNaN(svlDur)) return;
+      const initTime = SVL_INVERT ? svlDur - 0.05 : 0.02;
+      svlLastSeek = initTime;
+      // Show video once first frame seeked
+      scrollVideoLogo.addEventListener("seeked", svlShowVideo, { once: true });
       scrollVideoLogo.currentTime = initTime;
-      svlLastSeekTime = initTime;
-      if (scrollVideoContainer) scrollVideoContainer.classList.add("loaded");
       // Prime hardware decoder
       scrollVideoLogo.play().then(() => {
         scrollVideoLogo.pause();
         scrollVideoLogo.currentTime = initTime;
-      }).catch(() => { scrollVideoLogo.currentTime = initTime; });
+      }).catch(() => {});
+      // Hard fallback
+      setTimeout(svlShowVideo, 600);
     }
 
     scrollVideoLogo.addEventListener("loadedmetadata", svlInit, { once: true });
-    if (scrollVideoLogo.readyState >= 1 && scrollVideoLogo.duration) svlInit();
+    scrollVideoLogo.addEventListener("loadeddata", svlShowVideo, { once: true });
+    if (scrollVideoLogo.readyState >= 2) { svlInit(); svlShowVideo(); }
+    else if (scrollVideoLogo.readyState >= 1) svlInit();
 
     // Wheel
     if (introOverlay) {
       introOverlay.addEventListener("wheel", (e) => {
         e.preventDefault();
-        const norm  = e.deltaY / Math.max(Math.abs(e.deltaY), 1);
-        const delta = norm * 0.015;
-        svlTargetProgress = Math.max(0, Math.min(1, svlTargetProgress + delta));
+        const raw  = e.deltaY;
+        const norm = raw === 0 ? 0 : (raw > 0 ? 1 : -1);
+        const speed= Math.min(Math.abs(raw), 120) / 120;
+        const delta= norm * speed * 0.025;
+        svlTarget = Math.max(0, Math.min(1, svlTarget + delta));
       }, { passive: false });
 
-      // Touch
-      let svlLastTouchY = 0;
+      let svlLastTY = 0;
       introOverlay.addEventListener("touchstart", (e) => {
-        if (e.touches.length === 1) svlLastTouchY = e.touches[0].clientY;
+        if (e.touches.length === 1) svlLastTY = e.touches[0].clientY;
       }, { passive: true });
       introOverlay.addEventListener("touchmove", (e) => {
         if (e.touches.length !== 1) return;
         e.preventDefault();
-        const dy    = svlLastTouchY - e.touches[0].clientY;
-        svlLastTouchY = e.touches[0].clientY;
-        const delta = (dy / window.innerHeight) * 1.8;
-        svlTargetProgress = Math.max(0, Math.min(1, svlTargetProgress + delta));
+        const dy    = svlLastTY - e.touches[0].clientY;
+        svlLastTY   = e.touches[0].clientY;
+        const delta = (dy / window.innerHeight) * 2.2;
+        svlTarget   = Math.max(0, Math.min(1, svlTarget + delta));
       }, { passive: false });
     }
 
     function svlTick() {
-      if (svlDuration && !isNaN(svlDuration)) {
-        const diff = svlTargetProgress - svlCurrentProgress;
-        if (Math.abs(diff) > 0.0005) {
-          svlCurrentProgress += diff * SVL_LERP;
-          svlCurrentProgress  = Math.max(0, Math.min(1, svlCurrentProgress));
-          const p = svlCurrentProgress;
-
-          const mapped  = SVL_INVERT ? (1 - p) * svlDuration : p * svlDuration;
-          const clamped = Math.max(0, Math.min(svlDuration - 0.04, mapped));
-
-          if (Math.abs(clamped - svlLastSeekTime) > SVL_SEEK_THRESH) {
+      if (svlDur && !isNaN(svlDur)) {
+        const diff = svlTarget - svlCurrent;
+        if (Math.abs(diff) > 0.0004) {
+          svlCurrent += diff * SVL_LERP;
+          svlCurrent  = Math.max(0, Math.min(1, svlCurrent));
+          const p = svlCurrent;
+          const mapped  = SVL_INVERT ? (1 - p) * svlDur : p * svlDur;
+          const clamped = Math.max(0.01, Math.min(svlDur - 0.04, mapped));
+          if (Math.abs(clamped - svlLastSeek) > SVL_SEEK_TH) {
             scrollVideoLogo.currentTime = clamped;
-            svlLastSeekTime = clamped;
+            svlLastSeek = clamped;
           }
-
           if (scrollPrompt) {
-            scrollPrompt.style.opacity = p < 0.15 ? String(1 - p * 6.6) : "0";
+            scrollPrompt.style.opacity = p < 0.18 ? String(1 - p * 5.5) : "0";
           }
-
-          // Auto-enter: start the experience when fully disassembled
           if (p >= SVL_AUTO_ENTER && !svlEntered) {
             svlEntered = true;
             startExperience();
@@ -1223,6 +1236,8 @@
         }
       }
       requestAnimationFrame(svlTick);
+    }
+    requestAnimationFrame(svlTick);
     }
     requestAnimationFrame(svlTick);
       requestAnimationFrame(updateScrollVideo);
@@ -2059,6 +2074,26 @@
 
     // ── PLAYBACK CONTROL ──
     // ── PLAYBACK CONTROL ──
+    function backToIntro() {
+      // Stop audio if playing
+      if (typeof player !== "undefined" && player) {
+        try { player.stop(); } catch(e) {}
+      }
+      // Hide main app, show intro overlay
+      if (introOverlay) {
+        introOverlay.style.display = "";
+        // Reset scroll progress
+        svlTarget  = 0;
+        svlCurrent = 0;
+        svlLastSeek= -1;
+        svlEntered = false;
+        if (scrollVideoLogo && svlDur) {
+          const initTime = SVL_INVERT ? svlDur - 0.05 : 0.02;
+          scrollVideoLogo.currentTime = initTime;
+        }
+      }
+    }
+
     async function startExperience() {
       await Tone.start();
       

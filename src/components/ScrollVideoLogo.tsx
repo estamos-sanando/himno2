@@ -2,150 +2,173 @@ import { useRef, useEffect } from "react";
 
 interface ScrollVideoLogoProps {
   onStart: () => void;
-  /** If true: video starts at the END (shield assembled) and scrolling down disassembles it. */
+  /**
+   * true  = video frame 0 is DISASSEMBLED and end frame is ASSEMBLED
+   *         (scroll DOWN → re-assembles, auto-enter when assembled)
+   * false = video frame 0 is ASSEMBLED and end frame is DISASSEMBLED
+   *         (scroll DOWN → disassembles, auto-enter when disassembled)
+   */
   invertDirection?: boolean;
 }
 
-export default function ScrollVideoLogo({ onStart, invertDirection = true }: ScrollVideoLogoProps) {
+export default function ScrollVideoLogo({
+  onStart,
+  invertDirection = false, // default: start assembled (frame 0), scroll to disassemble
+}: ScrollVideoLogoProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const videoRef    = useRef<HTMLVideoElement>(null);
-  const canvasRef   = useRef<HTMLCanvasElement>(null);
+  const videoRef     = useRef<HTMLVideoElement>(null);
+  const loadingRef   = useRef<HTMLDivElement>(null);
+  const indicatorRef = useRef<HTMLDivElement>(null);
 
-  // All progress tracking lives in refs — never in React state — to avoid re-renders in the rAF loop
   const targetProgress  = useRef(0);
   const currentProgress = useRef(0);
-  const lastSeekTime    = useRef(-1);     // tracks last video.currentTime we wrote
-  const frameId         = useRef(0);
-  const enteredRef      = useRef(false);  // guard: only fire onStart once
+  const lastSeekTime    = useRef(-1);
+  const rafId           = useRef(0);
+  const enteredRef      = useRef(false);
+  const durationRef     = useRef(0);
+  const readyRef        = useRef(false);   // true once first frame is painted
 
-  // ── VIDEO LOAD & DECODER INIT ──────────────────────────────────────────
+  // ── VIDEO INIT ──────────────────────────────────────────────────────────
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
+    const showVideo = () => {
+      if (readyRef.current) return;
+      readyRef.current = true;
+      video.style.opacity = "1";
+      if (loadingRef.current) loadingRef.current.style.display = "none";
+    };
+
     const onMeta = () => {
       const dur = video.duration;
       if (!dur || isNaN(dur)) return;
+      durationRef.current = dur;
 
-      // Set initial frame immediately (no React state)
-      const initTime = invertDirection ? dur - 0.04 : 0.01;
-      video.currentTime = initTime;
+      // Seek to the initial frame (assembled shield)
+      const initTime = invertDirection ? dur - 0.05 : 0.02;
       lastSeekTime.current = initTime;
 
-      // Play→pause cycle primes the hardware decoder (required on Chrome mobile)
-      video.play().then(() => {
-        video.pause();
-        video.currentTime = initTime;
-      }).catch(() => {
-        video.currentTime = initTime;
-      });
+      // seeked fires once the frame is actually decoded → safe to show
+      const onFirstSeek = () => {
+        showVideo();
+        video.removeEventListener("seeked", onFirstSeek);
+      };
+      video.addEventListener("seeked", onFirstSeek);
+      video.currentTime = initTime;
 
-      // Show video
-      video.style.opacity = "1";
+      // Fallback: play→pause to prime hardware decoder, then show if seeked hasn't fired yet
+      video.play()
+        .then(() => { video.pause(); video.currentTime = initTime; })
+        .catch(() => {});
 
-      // Hide loading placeholder
-      const placeholder = containerRef.current?.querySelector<HTMLDivElement>(".vml-loading");
-      if (placeholder) placeholder.style.display = "none";
+      // Hard fallback: show after 600 ms no matter what
+      setTimeout(showVideo, 600);
     };
 
-    if (video.readyState >= 1 && video.duration) {
+    // Listen for both loadedmetadata and loadeddata for maximum compat
+    video.addEventListener("loadedmetadata", onMeta, { once: true });
+    video.addEventListener("loadeddata",     showVideo,  { once: true });
+
+    if (video.readyState >= 2) {
       onMeta();
-    } else {
-      video.addEventListener("loadedmetadata", onMeta, { once: true });
+      showVideo();
+    } else if (video.readyState >= 1) {
+      onMeta();
     }
 
-    return () => video.removeEventListener("loadedmetadata", onMeta);
+    return () => {
+      video.removeEventListener("loadedmetadata", onMeta);
+      video.removeEventListener("loadeddata",     showVideo);
+    };
   }, [invertDirection]);
 
-  // ── SCROLL / TOUCH INPUT ──────────────────────────────────────────────
+  // ── SCROLL / TOUCH INPUT ────────────────────────────────────────────────
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+    const el = containerRef.current;
+    if (!el) return;
 
-    // Wheel (mouse & trackpad)
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      // Normalize: mouse wheels give ~100 per notch, trackpads give 1-5
-      const normalised = e.deltaY / Math.max(Math.abs(e.deltaY), 1);
-      const delta = normalised * 0.015;   // 0.015 per "click" → ~67 clicks to traverse
+      // Normalise so 1 mouse-notch ≈ 0.015, big trackpad flicks don't skip too far
+      const raw   = e.deltaY;
+      const norm  = raw === 0 ? 0 : (raw > 0 ? 1 : -1);
+      const speed = Math.min(Math.abs(raw), 120) / 120; // cap at 1
+      const delta = norm * speed * 0.025;
       targetProgress.current = Math.max(0, Math.min(1, targetProgress.current + delta));
     };
 
-    // Touch (swipe up = disassemble)
-    let lastTouchY = 0;
+    let lastTY = 0;
     const onTouchStart = (e: TouchEvent) => {
-      if (e.touches.length === 1) lastTouchY = e.touches[0].clientY;
+      if (e.touches.length === 1) lastTY = e.touches[0].clientY;
     };
     const onTouchMove = (e: TouchEvent) => {
       if (e.touches.length !== 1) return;
       e.preventDefault();
-      const dy = lastTouchY - e.touches[0].clientY; // + = swipe up
-      lastTouchY = e.touches[0].clientY;
-      const delta = (dy / window.innerHeight) * 1.8; // one full-screen swipe ≈ 1.8× range
+      const dy  = lastTY - e.touches[0].clientY; // positive = swipe up = disassemble
+      lastTY    = e.touches[0].clientY;
+      const delta = (dy / window.innerHeight) * 2.2;
       targetProgress.current = Math.max(0, Math.min(1, targetProgress.current + delta));
     };
 
-    container.addEventListener("wheel",      onWheel,      { passive: false });
-    container.addEventListener("touchstart", onTouchStart, { passive: true  });
-    container.addEventListener("touchmove",  onTouchMove,  { passive: false });
+    el.addEventListener("wheel",      onWheel,      { passive: false });
+    el.addEventListener("touchstart", onTouchStart, { passive: true  });
+    el.addEventListener("touchmove",  onTouchMove,  { passive: false });
     return () => {
-      container.removeEventListener("wheel",      onWheel);
-      container.removeEventListener("touchstart", onTouchStart);
-      container.removeEventListener("touchmove",  onTouchMove);
+      el.removeEventListener("wheel",      onWheel);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove",  onTouchMove);
     };
   }, []);
 
-  // ── rAF LOOP — zero React state mutations ─────────────────────────────
+  // ── rAF LOOP — zero React state mutations ───────────────────────────────
   useEffect(() => {
-    const LERP_SPEED     = 0.10;   // lower = smoother but slower response
-    const SEEK_THRESHOLD = 0.003;  // only seek if mapped time changed by >3ms
-    const AUTO_TRIGGER   = 0.97;   // fire onStart when progress reaches this
+    const LERP         = 0.09;        // smooth but responsive
+    const SEEK_THRESH  = 0.003;       // skip write if < 3 ms change
+    const AUTO_ENTER   = 0.94;        // fire onStart at 94 % progress
 
     const tick = () => {
-      const video = videoRef.current;
-      if (video && video.duration && !isNaN(video.duration)) {
+      const dur = durationRef.current;
+      if (dur && !isNaN(dur)) {
         const diff = targetProgress.current - currentProgress.current;
-
-        if (Math.abs(diff) > 0.0005) {
-          currentProgress.current += diff * LERP_SPEED;
-          currentProgress.current = Math.max(0, Math.min(1, currentProgress.current));
-
+        if (Math.abs(diff) > 0.0004) {
+          currentProgress.current += diff * LERP;
+          currentProgress.current  = Math.max(0, Math.min(1, currentProgress.current));
           const p = currentProgress.current;
 
-          // Map to video time
-          const mapped = invertDirection
-            ? (1 - p) * video.duration
-            : p * video.duration;
-          const clamped = Math.max(0, Math.min(video.duration - 0.04, mapped));
+          // Map progress → video time
+          const mapped  = invertDirection
+            ? (1 - p) * dur          // invert: p=0 → end, p=1 → start
+            : p * dur;               // normal: p=0 → start, p=1 → end
+          const clamped = Math.max(0.01, Math.min(dur - 0.04, mapped));
 
-          // Only write currentTime if it actually moved — avoids seek thrash
-          if (Math.abs(clamped - lastSeekTime.current) > SEEK_THRESHOLD) {
-            video.currentTime = clamped;
+          const video = videoRef.current;
+          if (video && Math.abs(clamped - lastSeekTime.current) > SEEK_THRESH) {
+            video.currentTime  = clamped;
             lastSeekTime.current = clamped;
           }
 
-          // Update scroll indicator opacity (direct DOM mutation — no React state)
-          const indicator = containerRef.current?.querySelector<HTMLElement>(".vml-indicator");
-          if (indicator) {
-            indicator.style.opacity = p < 0.15 ? String(1 - p * 6.6) : "0";
+          // Scroll indicator fade-out
+          if (indicatorRef.current) {
+            indicatorRef.current.style.opacity =
+              p < 0.18 ? String(1 - p * 5.5) : "0";
           }
 
-          // Auto-enter when shield is fully disassembled
-          if (p >= AUTO_TRIGGER && !enteredRef.current) {
+          // Auto-enter on full disassemble
+          if (p >= AUTO_ENTER && !enteredRef.current) {
             enteredRef.current = true;
             onStart();
           }
         }
       }
-
-      frameId.current = requestAnimationFrame(tick);
+      rafId.current = requestAnimationFrame(tick);
     };
 
-    frameId.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frameId.current);
+    rafId.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId.current);
   }, [invertDirection, onStart]);
 
-  // ── RENDER ────────────────────────────────────────────────────────────
+  // ── RENDER ───────────────────────────────────────────────────────────────
   return (
     <div
       ref={containerRef}
@@ -153,32 +176,35 @@ export default function ScrollVideoLogo({ onStart, invertDirection = true }: Scr
         position: "absolute",
         inset: 0,
         overflow: "hidden",
-        background: "#000",
-        // Promote to GPU layer for zero-cost compositing
+        background: "#050a12",
         willChange: "transform",
+        WebkitTransform: "translateZ(0)",
         transform: "translateZ(0)",
+        cursor: "ns-resize",
+        userSelect: "none",
+        WebkitUserSelect: "none",
       }}
     >
-      {/* Loading placeholder */}
+      {/* Loading label */}
       <div
-        className="vml-loading"
+        ref={loadingRef}
         style={{
           position: "absolute",
           inset: 0,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          color: "rgba(255,255,255,0.4)",
-          fontSize: "14px",
-          letterSpacing: "2px",
+          color: "rgba(116,172,223,0.5)",
+          fontSize: "13px",
+          letterSpacing: "3px",
           textTransform: "uppercase",
-          zIndex: 2,
+          zIndex: 3,
         }}
       >
         Cargando…
       </div>
 
-      {/* Video — GPU layer, cover the full screen */}
+      {/* Video — promoted to its own GPU compositor layer */}
       <video
         ref={videoRef}
         src="/logo.mp4"
@@ -190,33 +216,36 @@ export default function ScrollVideoLogo({ onStart, invertDirection = true }: Scr
           inset: 0,
           width: "100%",
           height: "100%",
-          objectFit: "cover",
+          objectFit: "contain",   // contain keeps full shield visible without cropping
+          objectPosition: "center",
           pointerEvents: "none",
-          opacity: 0,                     // shown once loaded (set inline by effect)
-          transition: "opacity 0.5s ease",
+          opacity: 0,             // revealed by JS after first seeked event
+          transition: "opacity 0.6s ease",
           willChange: "transform",
+          WebkitTransform: "translateZ(0)",
           transform: "translateZ(0)",
+          background: "#050a12",
         }}
       />
 
-      {/* Vignette overlay */}
+      {/* Vignette */}
       <div
         style={{
           position: "absolute",
           inset: 0,
           background:
-            "radial-gradient(ellipse at 50% 50%, transparent 30%, rgba(0,0,0,0.65) 100%)",
+            "radial-gradient(ellipse 80% 80% at 50% 50%, transparent 35%, rgba(0,0,0,0.7) 100%)",
           pointerEvents: "none",
           zIndex: 2,
         }}
       />
 
-      {/* Scroll indicator — opacity mutated directly in rAF */}
+      {/* Scroll indicator */}
       <div
-        className="vml-indicator"
+        ref={indicatorRef}
         style={{
           position: "absolute",
-          bottom: "clamp(24px, 5vh, 48px)",
+          bottom: "clamp(20px, 4vh, 44px)",
           left: "50%",
           transform: "translateX(-50%)",
           display: "flex",
@@ -225,12 +254,13 @@ export default function ScrollVideoLogo({ onStart, invertDirection = true }: Scr
           gap: "8px",
           pointerEvents: "none",
           zIndex: 5,
-          color: "var(--cyan, #00f2fe)",
-          textShadow: "0 0 12px rgba(0,242,254,0.9)",
+          color: "#74acdf",
+          textShadow: "0 0 14px rgba(116,172,223,0.9)",
           opacity: 1,
-          transition: "opacity 0.2s ease",
+          transition: "opacity 0.25s ease",
         }}
       >
+        {/* Mouse icon */}
         <div
           style={{
             width: "18px",
@@ -240,6 +270,7 @@ export default function ScrollVideoLogo({ onStart, invertDirection = true }: Scr
             display: "flex",
             justifyContent: "center",
             paddingTop: "5px",
+            boxSizing: "border-box",
           }}
         >
           <div
@@ -248,28 +279,29 @@ export default function ScrollVideoLogo({ onStart, invertDirection = true }: Scr
               height: "6px",
               borderRadius: "3px",
               background: "currentColor",
-              animation: "vml-wheel 1.4s ease-in-out infinite",
+              animation: "svl-wheel 1.4s ease-in-out infinite",
             }}
           />
         </div>
         <span
           style={{
-            fontSize: "clamp(9px, 1.5vw, 11px)",
+            fontSize: "clamp(9px, 1.8vw, 11px)",
             fontWeight: 700,
             letterSpacing: "2px",
             textTransform: "uppercase",
+            textAlign: "center",
           }}
         >
-          Desliza para desarmar
+          Desplaza para ingresar a la web
         </span>
       </div>
 
-      {/* Keyframe for wheel dot — injected once via style tag */}
+      {/* Keyframe for wheel dot animation */}
       <style>{`
-        @keyframes vml-wheel {
+        @keyframes svl-wheel {
           0%   { opacity: 0;   transform: translateY(0); }
-          25%  { opacity: 1; }
-          75%  { opacity: 0.2; transform: translateY(8px); }
+          20%  { opacity: 1; }
+          80%  { opacity: 0.1; transform: translateY(9px); }
           100% { opacity: 0;   transform: translateY(0); }
         }
       `}</style>

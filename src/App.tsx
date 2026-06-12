@@ -271,6 +271,14 @@ export default function App() {
     setTrackingEnabled(false);
   }, [engine, activeMode, stopAll]);
 
+  const handleBackToIntro = useCallback(() => {
+    if (activeMode === "conductor") engine.stop();
+    else stopAll();
+    setIsPlaying(false);
+    setTrackingEnabled(false);
+    setShowIntro(true);
+  }, [engine, activeMode, stopAll]);
+
   const handleSongSelect = useCallback(async (song: Song) => {
     if (activeMode === "conductor") {
       engine.stop();
@@ -346,6 +354,22 @@ export default function App() {
         )}
 
         <div className="header-actions">
+          {/* Back to intro — lets user scroll the shield again */}
+          <button
+            id="btn-back-intro"
+            className="btn-primary"
+            style={{
+              marginRight: "8px",
+              background: "rgba(255,255,255,0.06)",
+              color: "var(--text-secondary)",
+              border: "1px solid var(--border-glass)",
+              fontSize: "13px",
+            }}
+            onClick={handleBackToIntro}
+            title="Volver a la pantalla de inicio"
+          >
+            ← Inicio
+          </button>
           <button
             id="btn-help"
             className="btn-primary"
